@@ -110,7 +110,7 @@ module Engine
             color: nil,
           },
           {
-            name: 'Yunnan Trading Contract (3p)',
+            name: 'Yunnan Trading Contract',
             sym: 'N2',
             value: 60,
             revenue: 0,

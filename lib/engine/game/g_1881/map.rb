@@ -163,15 +163,12 @@ module Engine
         }.freeze
 
         HEXES = {
-          # =====================================================================
-          # RED / OFFBOARD hexes
-          # =====================================================================
+          # OFFBOARD 
           red: {
-            # Yunnan – China (northwest border): sides 1,6 → Ruby 0,5
+            # Yunnan – China (northwest border)
             ['A2'] =>
               'offboard=revenue:yellow_40|green_70|brown_100;path=a:0,b:_0;path=a:5,b:_0',
-
-            # Guangxi – China (north coast): side 2 → Ruby 1
+            # Guangxi – China (north coast)
             ['I2'] =>
               'offboard=revenue:yellow_30|green_60|brown_100;path=a:1,b:_0',
 
@@ -201,7 +198,7 @@ module Engine
             ['C30'] =>
               'city=revenue:50;path=a:6,b:3;path=a:5,b:_0',
 
-            # Cambodia hub (west of Saigon): sides 3,1,6 → Ruby 2,0,5
+            # Cambodia hub (west of Saigon)
             ['G26'] =>
               'offboard=revenue:yellow_20|green_40|brown_70;path=a:0,b:_0;path=a:2,b:6;path=a:5,b:2',
           },
@@ -210,6 +207,8 @@ module Engine
           # WATER offboard hexes (coastal / sea routes with offboard revenue)
           # =====================================================================
           blue: {
+            ['J19'] =>
+              '',
             # Hainan – China sea: side 3 → Ruby 2
             ['J9'] =>
               'offboard=revenue:yellow_30|green_70|brown_90;path=a:2,b:_0',
@@ -232,9 +231,9 @@ module Engine
 
             # Coastal sea route connectors (permanent water track)
             # I8: gentle sides 4,6 → Ruby 3,5  (gentle: 3 and 5 differ by 2 ✓)
-            ['I8'] => 'path=a:3,b:5',
+            ['I8'] => 'path=a:3,b:5;path=a:1,b:5',
             # H9: gentle side 3 → Ruby 2; gentle 2↔0
-            ['H9'] => 'path=a:0,b:2',
+            ['H9'] => 'path=a:4,b:2',
             # G34: gentle side 2 → Ruby 1; gentle 1↔3
             ['G34'] => 'path=a:1,b:3',
             # F35: sharp side 5 → Ruby 4; sharp 4↔5
@@ -242,7 +241,7 @@ module Engine
             # K32: sharp side 5 → Ruby 4; sharp 4↔5
             ['K32'] => 'path=a:4,b:5',
             # L31: coastal town, value 20; sharp side 2 → Ruby 1 (1↔0), stub side 4 → Ruby 3
-            ['L31'] => 'town=revenue:20;path=a:0,b:_0;path=a:3,b:_0',
+            ['L31'] => 'town=revenue:20;path=a:1,b:2;path=a:3,b:_0',
           },
 
           # =====================================================================
@@ -250,30 +249,30 @@ module Engine
           # =====================================================================
           gray: {
             # Northern border towns (value 10): gentle side 6 → Ruby 5; town stub
-            %w[C2 E2 G2] => 'town=revenue:10;path=a:3,b:_0;path=a:5,b:_0',
+            %w[C2 E2 G2] => 'town=revenue:10;path=a:1,b:_0;path=a:5,b:_0',
 
             # D11: straight side 6 → Ruby 5; straight 5↔2
             ['D11'] => 'path=a:2,b:5',
 
             # E12: two gray towns (Dong Hoi area), gentle sides 4,1 → Ruby 3,0
             # gentle 3↔1 and gentle 0↔4 (approximation)
-            ['E12'] => 'town=revenue:20;town=revenue:20;path=a:1,b:_0;path=a:3,b:_0;path=a:0,b:_1;path=a:4,b:_1',
+            ['E12'] => 'town=revenue:20;town=revenue:20;path=a:0,b:_0;path=a:2,b:_0;path=a:3,b:_1;path=a:5,b:_1',
 
             # H3: Thai Nguyen gray town, complex junction
             # straight side 2 → Ruby 1 (1↔4); stub side 3 → Ruby 2; sharp side 6 → Ruby 5 (5↔0)
-            ['H3'] => 'town=revenue:20;path=a:0,b:_0;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0',
+            ['H3'] => 'town=revenue:20;path=a:0,b:5;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0',
 
             # A4: gentle side 4 → Ruby 3; gentle 3↔1
-            ['A4'] => 'path=a:1,b:3',
+            ['A4'] => 'path=a:5,b:3',
 
             # J3: gentle side 6 → Ruby 5; gentle 5↔3
-            ['J3'] => 'path=a:3,b:5',
+            ['J3'] => 'path=a:1,b:5',
 
             # K2: Mong Cai terminal gray town; straight stub side 1 → Ruby 0
             ['K2'] => 'town=revenue:30;path=a:0,b:_0',
 
             # F31: gentle side 6 → Ruby 5; gentle 5↔3
-            ['F31'] => 'path=a:3,b:5',
+            ['F31'] => 'path=a:1,b:5',
 
             # F33: My Tho gray double-town, stub sides 5,2 → Ruby 4,1
             ['F33'] => 'town=revenue:30;town=revenue:30;path=a:1,b:_0;path=a:4,b:_0',
@@ -282,7 +281,7 @@ module Engine
             ['I26'] => 'path=a:0,b:3;path=a:1,b:3;path=a:6,b:1',
 
             # K30: coastal junction; sharp side 5 → Ruby 4 (4↔3), gentle side 6 → Ruby 5 (5↔3)
-            ['K30'] => 'path=a:3,b:4;path=a:3,b:5',
+            ['K30'] => 'path=a:5,b:4;path=a:1,b:5',
 
             # L29: Nha Trang gray city (2 slots, CPA home), value 50
             # stubs on all 4 cardinal sides: sides 2,3,4,1 → Ruby 1,2,3,0
@@ -306,7 +305,7 @@ module Engine
           white: {
             # --- Blank terrain hexes (no city/town) ---
             # Plain blank (no terrain cost)
-            %w[D5 E8 F5 F9 G6 G8 G10 E10 H15 I14 I30 I32
+            %w[D5 D7 G14 E8 F5 F9 G6 G8 G10 E10 H15 I14 I30 I32
                J29 K24 K26 K28 L27 H27 G28 H29 H31 D31
                B33 C36 E34 L21] => '',
 
@@ -315,7 +314,7 @@ module Engine
               'upgrade=cost:60,terrain:mountain',
 
             # Mountain 30
-            %w[J23 J25] => 'upgrade=cost:30,terrain:mountain',
+            %w[J23 J25 I22] => 'upgrade=cost:30,terrain:mountain',
 
             # Water 60 (river crossing)
             %w[E32 K22 C34 D35 E36 I16] =>

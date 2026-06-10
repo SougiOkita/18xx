@@ -3,6 +3,8 @@
 require_relative 'entities'
 require_relative 'map'
 require_relative 'meta'
+require_relative 'round/auction'
+require_relative 'step/auction'
 require_relative '../base'
 
 module Engine
@@ -27,12 +29,7 @@ module Engine
 
         MUST_SELL_IN_BLOCKS = false
 
-        # =====================================================================
         # STOCK MARKET
-        # JSON sides 0→top row; legend 0=yellow(y), 1=green(i), 2=brown(b),
-        # 4=black/close(c).  Par cells in the yellow zone also carry 'p'.
-        # Empty strings represent blank/non-existent cells.
-        # =====================================================================
         MARKET = [
           # Row 0 (highest)
           %w[70 76 82 90 100 112 126 142 160 180 200 225 250 275 300 325 360 400 450],
@@ -40,8 +37,8 @@ module Engine
           %w[65 71 77 85 93 104 116 128 143 160 180 200 220 247b 260 290 320 355 395],
           # Row 2 – green ignore-sale zone at col 10
           %w[59 64 70 76 82 90 100 111 125 140 155i 170 185 204 230 253],
-          # Row 3 – yellow no-cert-limit / par zone cols 2-7
-          %w[54 59 65yp 72yp 78yp 84yp 90yp 100yp 110 121 133 147 162 182 201 222],
+          # Row 3 – par zone cols 2-7 (p = par; no_cert_limit added via game override)
+          %w[54 59 65p 72p 78p 84p 90p 100p 110 121 133 147 162 182 201 222],
           # Row 4
           %w[50 54 60 66 73 80 87 94 102 112 123 136 151 169 190],
           # Row 5 (cols 14-18 are reserved mainline slots — blank)
@@ -208,6 +205,37 @@ module Engine
             num: 6,
           },
         ].freeze
+
+        # =====================================================================
+        # INITIAL AUCTION ROUND
+        # =====================================================================
+        def init_round
+          @init_round ||= G1881::Round::Auction.new(self, [G1881::Step::Auction])
+        end
+
+        # Called when any company is purchased (concession or private).
+        # For concessions: calculate par from half the bid and float the corp.
+        def after_buy_company(player, company, price)
+          super
+
+          return unless company.id.end_with?('-C')
+
+          corp_sym = company.id.delete_suffix('-C')
+          corporation = corporation_by_id(corp_sym)
+          return unless corporation
+
+          # Par price = floor(price / 2), rounded down to nearest valid par
+          candidate = (price / 2).floor
+          par_price = stock_market.par_prices.select { |p| p.price <= candidate }.max_by(&:price)
+          par_price ||= stock_market.par_prices.min_by(&:price)
+
+          @log << "#{player.name} receives the president's share of #{corporation.name}"
+          @log << "Par price set to #{format_currency(par_price.price)} (half of #{format_currency(price)}, rounded down)"
+
+          stock_market.set_par(corporation, par_price)
+          share_pool.buy_shares(player, corporation.shares.first, exchange: :free, allow_president_change: true)
+          float_corporation(corporation)
+        end
 
         # =====================================================================
         # OPERATING ROUND (1830 placeholder steps)
