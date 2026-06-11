@@ -29,8 +29,8 @@ module Engine
             @sub_phase = :concessions
             @companies = []
 
-            # Build ordered concession queue: North → Central(s) → South
             @concession_queue = build_concession_queue
+            @log << "Concession order: #{@concession_queue.map(&:name).join(' → ')}"
             start_next_concession!
           end
 
@@ -138,28 +138,22 @@ module Engine
           end
 
           def build_concession_queue
-            queue = []
-            queue << company('CFI-C')  # North
-
             if @game.players.size == 3
-              central_id = %w[CFCA-C RCL-C].shuffle.first
+              central_id = %w[CFCA-C RCL-C].sort_by { @game.rand }.first
               central = company(central_id)
               @log << "Central concession in play: #{central.name}"
-              queue << central
+              [company('CFI-C'), central, company('STC-C')].sort_by { @game.rand }
             else
-              queue << company('CFCA-C')
-              queue << company('RCL-C')
+              [company('CFI-C'), company('CFCA-C'), company('RCL-C'), company('STC-C')].sort_by { @game.rand }
             end
-
-            queue << company('STC-C')  # South
-            queue
           end
 
-          def start_next_concession!
+          def start_next_concession!(first_bidder = nil)
             @auctioning = @concession_queue.shift
             entities.each(&:unpass!)
             @log << "--- Concession auction: #{@auctioning.name} ---"
-            goto_entity!(entities.first)
+            starter = first_bidder || entities.first
+            goto_entity!(starter)
           end
 
           def process_concession_bid(action)
@@ -218,7 +212,7 @@ module Engine
             @log << "#{winner.name} wins #{company.name} for #{@game.format_currency(price)}"
             @game.after_buy_company(winner, company, price)
 
-            after_concession!
+            after_concession!(winner)
           end
 
           def force_concession!
@@ -236,10 +230,10 @@ module Engine
             @log << "#{player.name} is forced to buy #{company.name} for #{@game.format_currency(price)}"
             @game.after_buy_company(player, company, price)
 
-            after_concession!
+            after_concession!(player)
           end
 
-          def after_concession!
+          def after_concession!(winner)
             entities.each(&:unpass!)
 
             if @concession_queue.empty?
@@ -250,7 +244,9 @@ module Engine
               goto_entity!(entities.first)
               auto_offer_if_sole!
             else
-              start_next_concession!
+              # Next concession starts with the player seated after the winner
+              next_starter = entities[(entities.index(winner) + 1) % entities.size]
+              start_next_concession!(next_starter)
             end
           end
 
@@ -260,9 +256,9 @@ module Engine
 
           def distribute_privates!
             num_players = @game.players.size
-            n_pool = privates_for_group('N', num_players).shuffle
-            s_pool = privates_for_group('S', num_players).shuffle
-            c_pool = privates_for_group('C', num_players).shuffle
+            n_pool = privates_for_group('N', num_players).sort_by { @game.rand }
+            s_pool = privates_for_group('S', num_players).sort_by { @game.rand }
+            c_pool = privates_for_group('C', num_players).sort_by { @game.rand }
 
             if num_players == 3
               north_winner = company('CFI-C').owner
@@ -290,17 +286,11 @@ module Engine
               next false unless c.id.start_with?(prefix)
               next false if c.id.end_with?('-C')  # skip concession companies
 
-              # C certificates come in 3p/4p paired sets — use the right set
+              # Only 4p-labeled privates are excluded from smaller games.
+              # 3p-labeled privates are included in all player counts.
               if prefix == 'C'
-                if c.name.include?('(4p)')
-                  num_players == 4
-                elsif c.name.include?('(3p)')
-                  num_players == 3
-                else
-                  true
-                end
+                c.name.include?('(4p)') ? num_players == 4 : true
               else
-                # For N and S: exclude the opposite-player-count explicit private
                 next false if c.name.include?('(4p)') && num_players != 4
 
                 true

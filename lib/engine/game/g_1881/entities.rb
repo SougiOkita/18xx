@@ -47,7 +47,7 @@ module Engine
 
           # === Central Railway share certificates ===
           {
-            name: 'Central Railway – Hai Van Pass (3p)',
+            name: 'Central Railway – Hai Van Pass',
             sym: 'C1',
             value: 60,
             revenue: 0,
@@ -55,7 +55,7 @@ module Engine
             color: nil,
           },
           {
-            name: 'Central Railway – Hai Van Pass (3p)',
+            name: 'Central Railway – Hai Van Pass',
             sym: 'C2',
             value: 60,
             revenue: 0,
@@ -137,7 +137,7 @@ module Engine
 
           # === Southern privates ===
           {
-            name: 'Mekong Delta Trading Contract (3p)',
+            name: 'Mekong Delta Trading Contract',
             sym: 'S1',
             value: 60,
             revenue: 0,
@@ -170,6 +170,16 @@ module Engine
                   'share in the South Concession.',
             color: nil,
           },
+          # S5 exists to balance the 3p distribution: North+South+Central each need S privates,
+          # totalling 4S, but only S1/S3/S4 are available (3 items) without this entry.
+          {
+            name: 'Mekong Delta Trading Contract B',
+            sym: 'S5',
+            value: 60,
+            revenue: 0,
+            desc: 'Gain a share in the South Concession (STC or TMR).',
+            color: nil,
+          },
         ].freeze
 
         CORPORATIONS = [
@@ -179,6 +189,7 @@ module Engine
             name: "Chemins de fer de l'Indochine",
             logo: '1881/CFI',
             simple_logo: '1881/CFI.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100, 100],
             coordinates: 'E6',
             color: '#d4af00',
@@ -189,6 +200,7 @@ module Engine
             name: 'Société générale des tramways à vapeur de Cochinchine',
             logo: '1881/STC',
             simple_logo: '1881/STC.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100, 100],
             coordinates: 'G32',
             color: '#e06666',
@@ -199,6 +211,7 @@ module Engine
             name: "Réseaux non concédés de l'Indochine",
             logo: '1881/RCL',
             simple_logo: '1881/RCL.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'J17',
             color: '#b4a7d6',
@@ -209,6 +222,7 @@ module Engine
             name: "Compagnie Française des Chemins de Fer de l'Annam",
             logo: '1881/CFCA',
             simple_logo: '1881/CFCA.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'K20',
             color: '#f9cb9c',
@@ -219,6 +233,7 @@ module Engine
             name: 'Transindochinois Railway',
             logo: '1881/TIR',
             simple_logo: '1881/TIR.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'H13',
             color: '#a4c2f4',
@@ -229,6 +244,7 @@ module Engine
             name: 'Tonkin–Yunnan Trade Company',
             logo: '1881/TTC',
             simple_logo: '1881/TTC.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'B3',
             color: '#6aa84f',
@@ -239,6 +255,7 @@ module Engine
             name: 'Chemin de fer de Trans-Mékong',
             logo: '1881/TMR',
             simple_logo: '1881/TMR.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'D33',
             color: '#999999',
@@ -249,6 +266,7 @@ module Engine
             name: 'Chemin de fer de Hai Phong',
             logo: '1881/HPR',
             simple_logo: '1881/HPR.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'I6',
             color: '#6fa8dc',
@@ -259,6 +277,7 @@ module Engine
             name: "Chemin de fer d'exportation de l'Arabica du Tonkin",
             logo: '1881/AT',
             simple_logo: '1881/AT.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'I28',
             color: '#7b4d12',
@@ -271,6 +290,7 @@ module Engine
             name: 'Société Française des Charbonnages du Tonkin',
             logo: '1881/SFTC',
             simple_logo: '1881/SFTC.alt',
+            float_percent: 50,
             tokens: [0, 50],
             coordinates: 'K4',
             color: '#000000',
@@ -281,6 +301,7 @@ module Engine
             name: "Compagnie des Pêcheries de l'Annam",
             logo: '1881/CPA',
             simple_logo: '1881/CPA.alt',
+            float_percent: 50,
             tokens: [0, 50, 80, 100],
             coordinates: 'L29',
             color: '#0b5394',
@@ -291,6 +312,7 @@ module Engine
             name: 'Compagnie des Fruits de Mer du Tonkin',
             logo: '1881/FMT',
             simple_logo: '1881/FMT.alt',
+            float_percent: 50,
             tokens: [0, 50],
             coordinates: 'C38',
             color: '#c8bfe7',

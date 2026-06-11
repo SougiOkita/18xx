@@ -5,6 +5,9 @@ require_relative 'map'
 require_relative 'meta'
 require_relative 'round/auction'
 require_relative 'step/auction'
+require_relative 'step/redeem_shares'
+require_relative 'step/issue_shares'
+require_relative 'step/merge'
 require_relative '../base'
 
 module Engine
@@ -25,19 +28,21 @@ module Engine
 
         STARTING_CASH = { 3 => 700, 4 => 525 }.freeze
 
-        CAPITALIZATION = :full
+        CAPITALIZATION = :incremental
 
         MUST_SELL_IN_BLOCKS = false
 
         # STOCK MARKET
+        # Par zones: p=yellow (always); x=green par (155, unlocked by green_par event); z=brown par (247, unlocked by brown_par event)
+        # Endgame zone: e=light blue (355, 360, 395, 400, 450)
         MARKET = [
-          # Row 0 (highest)
-          %w[70 76 82 90 100 112 126 142 160 180 200 225 250 275 300 325 360 400 450],
-          # Row 1 – brown multiple-buy zone begins at col 13
-          %w[65 71 77 85 93 104 116 128 143 160 180 200 220 247b 260 290 320 355 395],
-          # Row 2 – green ignore-sale zone at col 10
-          %w[59 64 70 76 82 90 100 111 125 140 155i 170 185 204 230 253],
-          # Row 3 – par zone cols 2-7 (p = par; no_cert_limit added via game override)
+          # Row 0 (highest) – cols 16-18 are light blue endgame zone
+          %w[70 76 82 90 100 112 126 142 160 180 200 225 250 275 300 325 360e 400e 450e],
+          # Row 1 – 247 = brown par + multiple-buy; cols 17-18 are endgame zone
+          %w[65 71 77 85 93 104 116 128 143 160 180 200 220 247zb 260 290 320 355e 395e],
+          # Row 2 – 155 = green par + ignore-sale
+          %w[59 64 70 76 82 90 100 111 125 140 155xi 170 185 204 230 253],
+          # Row 3 – yellow par only (cols 2-7); 110-182 are uncoloured
           %w[54 59 65p 72p 78p 84p 90p 100p 110 121 133 147 162 182 201 222],
           # Row 4
           %w[50 54 60 66 73 80 87 94 102 112 123 136 151 169 190],
@@ -55,9 +60,20 @@ module Engine
            '', '', '', '', '', '', '', ''],
         ].freeze
 
-        # Map legend-0 (yellow/no-cert-limit) and par zones to yellow colour;
-        # close stays black; ignore_one_sale stays green; multiple_buy stays brown.
-        STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(par: :yellow).freeze
+        STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(
+          par: :yellow,
+          par_1: :green,
+          par_2: :brown,
+        ).freeze
+
+        # Endgame: bankrupt = immediate; stock market (light blue zone) OR first 8+ purchase = one more full OR set
+        GAME_END_CHECK = { bankrupt: :immediate, stock_market: :one_more_full_or_set }.freeze
+
+        EVENTS_TEXT = Base::EVENTS_TEXT.merge(
+          green_par: ['Green par available', 'Corporations may now par at green price (₫155)'],
+          brown_par: ['Brown par available', 'Corporations may now par at brown price (₫247)'],
+          eight_plus_purchased: ['First 8+ train sold', 'End game triggered — complete this OR set then play one more'],
+        ).freeze
 
         # =====================================================================
         # PHASES
@@ -133,10 +149,7 @@ module Engine
         # cost when discounting a prior train — stored as discount entries below.
         # =====================================================================
         TRAINS = [
-          # +1 bonus train (starter): counts as 1-city distance for now
-          { name: '+1', distance: 1, price: 30, num: 12 },
-
-          # Standard trains
+          # Standard trains — 2-trains are the first purchasable trains
           { name: '2', distance: 2, price: 80, rusts_on: '4', num: 6 },
 
           # 120 base; 40 discount when trading a 2-train (saves 80)
@@ -147,6 +160,7 @@ module Engine
             discount: { '2' => 80 },
             rusts_on: '5',
             num: 5,
+            events: [{ 'type' => 'green_par' }],
           },
 
           # 300 base; 60 discount when trading a 3-train (saves 60 → pays 240)
@@ -154,7 +168,7 @@ module Engine
             name: '4',
             distance: 4,
             price: 300,
-            discount: { '3' => 60 },
+            discount: { '3' => 100 },
             rusts_on: '6',
             num: 4,
           },
@@ -167,13 +181,16 @@ module Engine
             discount: { '4' => 150 },
             rusts_on: '8+',
             num: 4,
-            events: [{ 'type' => 'close_companies' }],
+            events: [{ 'type' => 'close_companies' }, { 'type' => 'brown_par' }],
           },
 
-          # 5+1: runs 5 cities + 1 bonus stop; 520 base (420 with trade-in)
+          # 5+1: 5 cities/offboards + 1 free town (E-train style)
           {
             name: '5+1',
-            distance: [{ 'nodes' => %w[city offboard town], 'pay' => 5, 'visit' => 6 }],
+            distance: [
+              { 'nodes' => %w[city offboard], 'pay' => 5, 'visit' => 5 },
+              { 'nodes' => %w[town],          'pay' => 1, 'visit' => 1 },
+            ],
             price: 520,
             discount: { '5' => 100 },
             num: 2,
@@ -188,13 +205,17 @@ module Engine
             num: 3,
           },
 
-          # 8+ ultra train (like D): unlimited city reach, 12 available
+          # 8+ ultra train: 8 cities/offboards + all towns free (E-train style). First purchase triggers end game.
           {
             name: '8+',
-            distance: [{ 'nodes' => %w[city offboard town], 'pay' => 8, 'visit' => 99 }],
+            distance: [
+              { 'nodes' => %w[city offboard], 'pay' => 8,  'visit' => 8  },
+              { 'nodes' => %w[town],          'pay' => 99, 'visit' => 99 },
+            ],
             price: 1100,
             discount: { '5' => 300, '5+1' => 300, '6' => 300 },
             num: 12,
+            events: [{ 'type' => 'eight_plus_purchased' }],
           },
 
           # R2+1: Rapid 2+1 regional train (like a 3E/diesel variant)
@@ -204,7 +225,191 @@ module Engine
             price: 300,
             num: 6,
           },
+
+          # +1 trains are always available. They cannot run alone; while owned by a
+          # corporation, they grant one free town stop to each numeric-distance train route.
+          {
+            name: '+1',
+            distance: 1,
+            price: 30,
+            num: 12,
+            available_on: '+1',
+          },
         ].freeze
+
+        # =====================================================================
+        # ROUTE RULES
+        # =====================================================================
+
+        # The four Laos offboard hexes form a single region: when a route visits
+        # multiple Laos hexes they count as ONE stop for distance and ONE revenue
+        # value (the highest-revenue Laos hex on the route is collected).
+        LAOS_HEXES = %w[E14 E16 F17 G18].freeze
+
+        # The Cambodia gate path (red pass-through hexes with no revenue nodes).
+        # A route using any of these hexes requires a token in Phnom Penh (C30).
+        CAMBODIA_GATE_HEXES = %w[C28 D27 E26 F25].freeze
+        PHNOM_PENH_HEX = 'C30'
+
+        # =====================================================================
+        # TILE LAY RULES (phase-based)
+        # Yellow: 2 yellow lays; Green: 2 yellow OR 1 green upgrade; Brown: 1
+        # =====================================================================
+        YELLOW_TILE_LAYS = [
+          { lay: true, upgrade: false, cost: 0 },
+          { lay: true, upgrade: false, cost: 0 },
+        ].freeze
+
+        GREEN_TILE_LAYS = [
+          { lay: true, upgrade: true, cost: 0 },
+          { lay: :not_if_upgraded, upgrade: false, cost: 0 },
+        ].freeze
+
+        BROWN_TILE_LAYS = [{ lay: true, upgrade: true, cost: 0 }].freeze
+
+        # =====================================================================
+        # TILE LAY RULES
+        # =====================================================================
+        def tile_lays(_entity)
+          if @phase.tiles.include?(:brown)
+            self.class::BROWN_TILE_LAYS
+          elsif @phase.tiles.include?(:green)
+            self.class::GREEN_TILE_LAYS
+          else
+            self.class::YELLOW_TILE_LAYS
+          end
+        end
+
+        # =====================================================================
+        # ROUTE METHODS
+        # =====================================================================
+
+        # Exclude +1 trains from the list of trains that can be submitted as routes.
+        # They act as a passive bonus (see check_distance below).
+        def route_trains(entity)
+          super.reject { |t| t.name == '+1' }
+        end
+
+        # Laos grouping: collapse all Laos stops to ONE for distance counting.
+        # Revenue from all visited Laos hexes is still collected in full.
+        def laos_collapsed(visits)
+          laos = visits.select { |v| self.class::LAOS_HEXES.include?(v.hex.id) }
+          return visits if laos.size <= 1
+
+          visits - laos[1..]
+        end
+
+        # How many +1 trains does the owning corporation hold?
+        def num_plus_one_trains(owner)
+          return 0 unless owner.respond_to?(:trains)
+
+          owner.trains.count { |t| t.name == '+1' }
+        end
+
+        # Distance validation:
+        #   1. Collapse multiple Laos stops to one stop for distance purposes.
+        #   2. For simple numeric-distance trains (2/3/4/5/6), each +1 train the
+        #      corporation owns grants one free town stop on this route.
+        def check_distance(route, visits, train = nil)
+          t = train || route.train
+          effective = laos_collapsed(visits)
+
+          if t.distance.is_a?(Numeric) && t.name != '+1'
+            num_free = num_plus_one_trains(t.owner)
+            if num_free.positive?
+              free_towns = effective.select(&:town?).first(num_free)
+              effective = effective - free_towns
+            end
+          end
+
+          super(route, effective, t)
+        end
+
+        # Per-route checks:
+        #   - +1 train cannot be submitted as a standalone route.
+        #   - Using the Cambodia gate path (C28→D27→E26→F25) requires a token in C30.
+        def check_other(route)
+          if route.train.name == '+1'
+            raise GameError, '+1 train cannot run a route by itself'
+          end
+
+          if route.all_hexes.any? { |h| self.class::CAMBODIA_GATE_HEXES.include?(h.id) }
+            pp = hex_by_id(self.class::PHNOM_PENH_HEX)
+            tokened = pp.tile.cities.any? { |c| c.tokened_by?(route.corporation) }
+            raise GameError, 'Must have a token in Phnom Penh (C30) to use the Cambodia gate path' unless tokened
+          end
+        end
+
+        # Cross-route guard: +1 trains must not appear in any submitted route.
+        def check_route_combination(routes)
+          if routes.any? { |r| r.train.name == '+1' }
+            raise GameError, '+1 train cannot be run as a route'
+          end
+        end
+
+        # =====================================================================
+        # ISSUE / REDEEM
+        # Like 1849: may not issue/redeem until after first full OR.
+        # Redeem: buy back 1 share from market (share price moves right).
+        # Issue: sell up to 5 IPO shares to market (share price moves left).
+        # =====================================================================
+        def issuable_shares(entity)
+          return [] unless entity.operating_history.size >= 1
+
+          num_shares = 5 - entity.num_market_shares
+          bundles = bundles_for_corporation(entity, entity)
+          bundles.reject { |bundle| bundle.num_shares > num_shares }
+        end
+
+        def redeemable_shares(entity)
+          return [] unless entity.operating_history.size >= 1
+
+          bundles_for_corporation(share_pool, entity)
+            .reject { |bundle| bundle.shares.size > 1 || entity.cash < bundle.price }
+        end
+
+        # =====================================================================
+        # MERGE (phases '2' and '3' only)
+        # =====================================================================
+        def mergeable?(corp)
+          corp.floated? && !corp.closed?
+        end
+
+        # =====================================================================
+        # GAME END
+        # =====================================================================
+        def game_end_check_stock_market?
+          @stock_market.max_reached? || @eight_plus_purchased
+        end
+
+        def event_eight_plus_purchased!
+          @log << '-- Event: First 8+ train purchased — end game triggered --'
+          @eight_plus_purchased = true
+        end
+
+        # =====================================================================
+        # PAR ZONE MANAGEMENT
+        # =====================================================================
+        def setup
+          @available_par_groups = %i[par]
+          @eight_plus_purchased = false
+        end
+
+        def par_prices
+          @stock_market.share_prices_with_types(@available_par_groups)
+        end
+
+        def event_green_par!
+          @log << "-- Event: #{self.class::EVENTS_TEXT[:green_par][0]} --"
+          @available_par_groups << :par_1
+          update_cache(:share_prices)
+        end
+
+        def event_brown_par!
+          @log << "-- Event: #{self.class::EVENTS_TEXT[:brown_par][0]} --"
+          @available_par_groups << :par_2
+          update_cache(:share_prices)
+        end
 
         # =====================================================================
         # INITIAL AUCTION ROUND
@@ -234,27 +439,32 @@ module Engine
 
           stock_market.set_par(corporation, par_price)
           share_pool.buy_shares(player, corporation.shares.first, exchange: :free, allow_president_change: true)
-          float_corporation(corporation)
+
+          # Seed corporation with the president's 20% share value (par_price × 2).
+          # The concession price went to the bank; the bank forwards par_price × 2 to the corp.
+          seed = par_price.price * 2
+          @bank.spend(seed, corporation)
+          @log << "#{corporation.name} receives #{format_currency(seed)}"
         end
 
         # =====================================================================
-        # OPERATING ROUND (1830 placeholder steps)
+        # OPERATING ROUND
         # =====================================================================
         def operating_round(round_num)
-          Round::Operating.new(self, [
+          Engine::Round::Operating.new(self, [
             Engine::Step::Bankrupt,
-            Engine::Step::Exchange,
+            G1881::Step::RedeemShares,    # 1. Redeem share (beginning of OR)
             Engine::Step::SpecialTrack,
             Engine::Step::SpecialToken,
-            Engine::Step::BuyCompany,
             Engine::Step::HomeToken,
-            Engine::Step::Track,
-            Engine::Step::Token,
-            Engine::Step::Route,
-            Engine::Step::Dividend,
+            Engine::Step::Track,          # 2. Lay/upgrade tiles (phase-based)
+            Engine::Step::Token,          # 3. Place station token
+            Engine::Step::Route,          # 4. Run trains (TODO: custom route logic)
+            Engine::Step::Dividend,       # 5. Pay dividend (TODO: custom dividend)
             Engine::Step::DiscardTrain,
-            Engine::Step::BuyTrain,
-            [Engine::Step::BuyCompany, { blocks: true }],
+            Engine::Step::BuyTrain,       # 6. Buy trains (+1 always available via depot)
+            G1881::Step::IssueShares,     # 7. Issue shares (end of OR)
+            G1881::Step::Merge,           # 8. Merge (phases 2 & 3 only)
           ], round_num: round_num)
         end
       end

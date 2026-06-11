@@ -102,12 +102,12 @@ module Engine
           'HV2' => {
             'count' => 1,
             'color' => 'green',
-            'code' => 'town=revenue:0;city=revenue:80;path=a:0,b:_0;path=a:2,b:_1;label=HV',
+            'code' => 'city=revenue:80,slots:2;path=a:0,b:_0;path=a:2,b:_0;label=HV',
           },
           'HV3' => {
             'count' => 1,
             'color' => 'brown',
-            'code' => 'town=revenue:0;city=revenue:120;path=a:0,b:_0;path=a:2,b:_1;label=HV',
+            'code' => 'city=revenue:120,slots:3;path=a:0,b:_0;path=a:2,b:_0;label=HV',
           },
         }.freeze
 
@@ -275,7 +275,7 @@ module Engine
             ['F31'] => 'path=a:1,b:5',
 
             # F33: My Tho gray double-town, stub sides 5,2 → Ruby 4,1
-            ['F33'] => 'town=revenue:30;town=revenue:30;path=a:1,b:_0;path=a:4,b:_0',
+            ['F33'] => 'town=revenue:30;town=revenue:30;path=a:1,b:_0;path=a:4,b:_1',
 
             # I26: mountain junction; straight side 1 → Ruby 0 (0↔3), gentle side 2 → Ruby 1 (1↔3)
             ['I26'] => 'path=a:0,b:3;path=a:1,b:3;path=a:6,b:1',
