@@ -51,7 +51,8 @@ module Engine
             sym: 'C1',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the Central Concession (CFCA or RCL).',
+            desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
+                  'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
@@ -59,7 +60,8 @@ module Engine
             sym: 'C2',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the Central Concession (CFCA or RCL).',
+            desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
+                  'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
@@ -67,7 +69,8 @@ module Engine
             sym: 'C1+',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the Central Concession (CFCA or RCL).',
+            desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
+                  'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
@@ -75,7 +78,8 @@ module Engine
             sym: 'C2+',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the Central Concession (CFCA or RCL).',
+            desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
+                  'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
 
@@ -85,8 +89,13 @@ module Engine
             sym: 'C3',
             value: 150,
             revenue: 10,
-            desc: 'Reserve a share in one of the Central Concession companies. May be used to make a '\
-                  'free token placement on K18 (Hai Van Pass).',
+            desc: 'Reserves a share in a Central Concession corporation. While held by a player, '\
+                  'this private blocks K18 (Hai Van Pass) from being upgraded. '\
+                  'The holder may forfeit the ₫10 income to claim the reserved share '\
+                  '(private becomes inactive with ₫0 revenue). '\
+                  'When purchased by a corporation, the reserved share transfers to that corporation; '\
+                  'the corporation may then close this private for a free tile and token placement on K18. '\
+                  'K18 can only be upgraded to HV tiles.',
             color: nil,
           },
           {
@@ -94,8 +103,8 @@ module Engine
             sym: 'C4',
             value: 150,
             revenue: 10,
-            desc: 'Owning company can trade this private for the Laos Express Contract. Every time the '\
-                  'owning company runs a route that includes a stop in Laos, add 10 to the route revenue.',
+            desc: 'When purchased by a corporation, immediately converted to the Laos Export Contract. '\
+                  'The contract grants +₫10 revenue per Laos hex visited on each route.',
             color: nil,
           },
 
@@ -145,7 +154,7 @@ module Engine
             color: nil,
           },
           {
-            name: 'Mekong Delta Trading Contract (4p)',
+            name: 'Mekong Delta Trading Contract',
             sym: 'S2',
             value: 60,
             revenue: 0,

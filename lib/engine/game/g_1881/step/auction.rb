@@ -269,6 +269,13 @@ module Engine
               assign_pile(north_winner,   n_pool.shift(2) + [s_pool.shift, c_pool.shift])
               assign_pile(south_winner,   s_pool.shift(2) + [n_pool.shift, c_pool.shift])
               assign_pile(central_winner, c_pool.shift(2) + [n_pool.shift, s_pool.shift])
+
+              # C1/C2 both map to the single floated central corp; C3 reserved share same corp
+              central_sym = central_concession.id.delete_suffix('-C')
+              @game.setup_central_share_data(
+                share_assignments: { 'C1' => central_sym, 'C2' => central_sym },
+                c3_reserved_corp: central_sym
+              )
             else
               # 4p: identify the two central winners
               central_winners = %w[CFCA-C RCL-C].map { |id| company(id).owner }
@@ -278,6 +285,17 @@ module Engine
                 pile << c_pool.shift if central_winners.include?(player)
                 assign_pile(player, pile.compact)
               end
+
+              # 4p: randomly split C1/C2/C1+/C2+ — two give CFCA shares, two give RCL shares
+              share_privates = %w[C1 C2 C1+ C2+].sort_by { @game.rand }
+              share_assignments = {}
+              share_privates[0..1].each { |id| share_assignments[id] = 'CFCA' }
+              share_privates[2..3].each { |id| share_assignments[id] = 'RCL' }
+              c3_corp = %w[CFCA RCL].sort_by { @game.rand }.first
+              @game.setup_central_share_data(
+                share_assignments: share_assignments,
+                c3_reserved_corp: c3_corp
+              )
             end
           end
 

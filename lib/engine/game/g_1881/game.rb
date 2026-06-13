@@ -393,6 +393,20 @@ module Engine
         def setup
           @available_par_groups = %i[par]
           @eight_plus_purchased = false
+          @central_share_assignments = {}
+          @c3_reserved_corp_sym = nil
+          @c3_redeemed = false
+          @laos_contract_owner = nil
+        end
+
+        # Called from step/auction.rb after distribute_privates! to record
+        # which central corp each share certificate maps to.
+        def setup_central_share_data(share_assignments:, c3_reserved_corp:)
+          @central_share_assignments = share_assignments
+          @c3_reserved_corp_sym = c3_reserved_corp
+          @log << "Central share certificate assignments: " \
+                  "#{share_assignments.map { |id, sym| "#{id}→#{sym}" }.join(', ')}"
+          @log << "C3 reserved share: #{c3_reserved_corp}"
         end
 
         def par_prices
@@ -421,12 +435,33 @@ module Engine
         # Mapping of private company → minor corporation it floats.
         MINOR_PRIVATE_MAP = { 'N1' => 'SFTC', 'S3' => 'FMT' }.freeze
 
-        # Called when any company is purchased (concession or private).
-        # Concessions (-C suffix) float a major corp; N1/S3 float a minor corp.
-        # In both cases: par = floor(bid / 2) rounded down to nearest par price.
-        def after_buy_company(player, company, price)
+        # Central share certificate IDs (C1/C2 in 3p, C1/C2/C1+/C2+ in 4p).
+        CENTRAL_SHARE_CERT_IDS = %w[C1 C2 C1+ C2+].freeze
+
+        # Called when any company is purchased (auction phase or SR).
+        def after_buy_company(buyer, company, price)
           super
 
+          # Central share certificates: buyer receives a corp share, bid → corp
+          if self.class::CENTRAL_SHARE_CERT_IDS.include?(company.id)
+            handle_central_share_certificate(buyer, company, price)
+            return
+          end
+
+          # C3: when a corporation buys it, the reserved share transfers to them
+          if company.id == 'C3' && buyer.is_a?(Engine::Corporation)
+            handle_c3_company_purchase(buyer, company)
+            return
+          end
+
+          # C4: when a corporation buys it, automatically establish the Laos contract
+          if company.id == 'C4' && buyer.is_a?(Engine::Corporation)
+            handle_c4_company_purchase(buyer, company)
+            return
+          end
+
+          # Concessions (-C suffix) float a major corp; N1/S3 float a minor corp.
+          # Par = floor(bid / 2) rounded down to nearest par price.
           corp_sym = if company.id.end_with?('-C')
                        company.id.delete_suffix('-C')
                      else
@@ -434,7 +469,7 @@ module Engine
                      end
           return unless corp_sym
 
-          float_via_private!(player, company, price, corp_sym)
+          float_via_private!(buyer, company, price, corp_sym)
         end
 
         def float_via_private!(player, _company, price, corp_sym)
@@ -455,6 +490,82 @@ module Engine
           seed = par_price.price * 2
           @bank.spend(seed, corporation)
           @log << "#{corporation.name} receives #{format_currency(seed)}"
+        end
+
+        # Central share certificate purchased: buyer gets one IPO share of the
+        # mapped corp, and the bid price is redirected from the bank to that corp.
+        def handle_central_share_certificate(buyer, company, price)
+          corp_sym = @central_share_assignments[company.id]
+          unless corp_sym
+            @log << "#{company.name}: no central corp assignment found"
+            return
+          end
+
+          corp = corporation_by_id(corp_sym)
+          unless corp
+            @log << "#{company.name}: corporation #{corp_sym} not found"
+            return
+          end
+
+          share = corp.shares.find { |s| !s.president && s.owner == corp }
+          unless share
+            @log << "#{corp.name} has no IPO shares available for #{company.name}"
+            return
+          end
+
+          share_pool.buy_shares(buyer, share, exchange: :free, allow_president_change: false)
+          @log << "#{buyer.name} receives one share of #{corp.name} via #{company.name}"
+
+          # player → bank already happened in assign_private!; redirect bank → corp
+          @bank.spend(price, corp)
+          @log << "#{corp.name} receives #{format_currency(price)} (#{company.name} proceeds)"
+        end
+
+        # When a corporation purchases C3 during the SR, the reserved central
+        # concession share transfers to that corporation (if not already redeemed).
+        def handle_c3_company_purchase(corp, company)
+          unless @c3_redeemed
+            reserved_corp = corporation_by_id(@c3_reserved_corp_sym)
+            if reserved_corp
+              share = reserved_corp.shares.find { |s| !s.president && s.owner == reserved_corp }
+              if share
+                share_pool.buy_shares(corp, share, exchange: :free, allow_president_change: false)
+                @log << "#{corp.name} receives the C3 reserved share of #{reserved_corp.name}"
+                @c3_redeemed = true
+              else
+                @log << "#{reserved_corp.name} has no IPO shares remaining for C3 reserved share"
+              end
+            end
+          end
+          @log << "#{corp.name} owns #{company.name} and may close it for a free tile+token on K18"
+        end
+
+        # When a corporation purchases C4 during the SR, it is immediately
+        # converted to the Laos Export Contract (grants +₫10/Laos hex per route).
+        def handle_c4_company_purchase(corp, company)
+          company.close!
+          @laos_contract_owner = corp
+          @log << "#{corp.name} trades #{company.name} for the Laos Export Contract"
+          @log << "#{corp.name} receives +#{format_currency(10)} per Laos hex on each route"
+        end
+
+        # Add Laos Export Contract bonus: +10 per Laos hex visited on the route.
+        def revenue_for(route, stops)
+          base = super
+          return base unless @laos_contract_owner && route.train.owner == @laos_contract_owner
+
+          laos_count = stops.count { |s| self.class::LAOS_HEXES.include?(s.hex.id) }
+          base += laos_count * 10 if laos_count.positive?
+          base
+        end
+
+        # Block K18 upgrades while C3 is held by a player (not a corporation).
+        def upgrades_to?(from, to, special = false, selected_company: nil)
+          if from.hex&.id == 'K18'
+            c3 = company_by_id('C3')
+            return false if c3 && !c3.closed? && c3.owner.is_a?(Engine::Player)
+          end
+          super
         end
 
         # =====================================================================
