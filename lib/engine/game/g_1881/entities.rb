@@ -105,8 +105,8 @@ module Engine
             sym: 'N1',
             value: 130,
             revenue: 0,
-            desc: 'Gain the minor company SFCT. Par price equals half the bid price, rounded down to the '\
-                  'nearest par price.',
+            desc: 'Gain the director\'s share of SFTC. Par price equals half the bid price, rounded down '\
+                  'to the nearest par price.',
             color: nil,
           },
           {
@@ -157,8 +157,8 @@ module Engine
             sym: 'S3',
             value: 130,
             revenue: 0,
-            desc: 'Gain the minor company Société de produits de la mer. Par price equals half the bid '\
-                  'price, rounded down to the nearest par price.',
+            desc: 'Gain the director\'s share of FMT. Par price equals half the bid price, rounded down '\
+                  'to the nearest par price.',
             color: nil,
           },
           {
@@ -290,6 +290,8 @@ module Engine
             name: 'Société Française des Charbonnages du Tonkin',
             logo: '1881/SFTC',
             simple_logo: '1881/SFTC.alt',
+            shares: [50, 25, 25],
+            share_percent: 25,
             float_percent: 50,
             tokens: [0, 50],
             coordinates: 'K4',
@@ -312,6 +314,8 @@ module Engine
             name: 'Compagnie des Fruits de Mer du Tonkin',
             logo: '1881/FMT',
             simple_logo: '1881/FMT.alt',
+            shares: [50, 25, 25],
+            share_percent: 25,
             float_percent: 50,
             tokens: [0, 50],
             coordinates: 'C38',

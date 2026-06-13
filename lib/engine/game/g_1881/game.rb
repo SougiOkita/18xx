@@ -418,30 +418,40 @@ module Engine
           @init_round ||= G1881::Round::Auction.new(self, [G1881::Step::Auction])
         end
 
+        # Mapping of private company → minor corporation it floats.
+        MINOR_PRIVATE_MAP = { 'N1' => 'SFTC', 'S3' => 'FMT' }.freeze
+
         # Called when any company is purchased (concession or private).
-        # For concessions: calculate par from half the bid and float the corp.
+        # Concessions (-C suffix) float a major corp; N1/S3 float a minor corp.
+        # In both cases: par = floor(bid / 2) rounded down to nearest par price.
         def after_buy_company(player, company, price)
           super
 
-          return unless company.id.end_with?('-C')
+          corp_sym = if company.id.end_with?('-C')
+                       company.id.delete_suffix('-C')
+                     else
+                       self.class::MINOR_PRIVATE_MAP[company.id]
+                     end
+          return unless corp_sym
 
-          corp_sym = company.id.delete_suffix('-C')
+          float_via_private!(player, company, price, corp_sym)
+        end
+
+        def float_via_private!(player, _company, price, corp_sym)
           corporation = corporation_by_id(corp_sym)
           return unless corporation
 
-          # Par price = floor(price / 2), rounded down to nearest valid par
           candidate = (price / 2).floor
           par_price = stock_market.par_prices.select { |p| p.price <= candidate }.max_by(&:price)
           par_price ||= stock_market.par_prices.min_by(&:price)
 
-          @log << "#{player.name} receives the president's share of #{corporation.name}"
-          @log << "Par price set to #{format_currency(par_price.price)} (half of #{format_currency(price)}, rounded down)"
+          @log << "#{player.name} receives the director's share of #{corporation.name}"
+          @log << "Par price set to #{format_currency(par_price.price)} " \
+                  "(half of #{format_currency(price)}, rounded down)"
 
           stock_market.set_par(corporation, par_price)
           share_pool.buy_shares(player, corporation.shares.first, exchange: :free, allow_president_change: true)
 
-          # Seed corporation with the president's 20% share value (par_price × 2).
-          # The concession price went to the bank; the bank forwards par_price × 2 to the corp.
           seed = par_price.price * 2
           @bank.spend(seed, corporation)
           @log << "#{corporation.name} receives #{format_currency(seed)}"
