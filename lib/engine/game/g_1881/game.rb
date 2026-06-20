@@ -393,6 +393,14 @@ module Engine
           players.each { |p| bank.spend(cash, p) }
         end
 
+        # Terrain costs (mountain/water) apply to every upgrade, not just blank→yellow.
+        # Placed tiles carry no terrain data, so fall back to the hex's original preprinted
+        # tile to read the terrain cost for yellow→green, green→brown, etc.
+        def upgrade_cost(tile, hex, entity, spender)
+          terrain_tile = tile.terrain.any? ? tile : hex.original_tile
+          super(terrain_tile, hex, entity, spender)
+        end
+
         # =====================================================================
         # PAR ZONE MANAGEMENT
         # =====================================================================
@@ -648,6 +656,8 @@ module Engine
         # cancel them out (this happens after any sell that deposits shares in the pool).
         def close_market_shorts
           @corporations.each do |corporation|
+            next if corporation.closed?
+
             count = 0
             while entity_shorts(@share_pool, corporation).any? &&
                   (pool_longs = @share_pool.shares_of(corporation)
@@ -663,6 +673,7 @@ module Engine
         # market (share-pool) shorts.
         def close_bank_shorts
           @corporations.each do |corporation|
+            next if corporation.closed?
             next unless corporation.share_price
             next if corporation.share_price.acquisition? || corporation.share_price.liquidation?
 
@@ -674,6 +685,51 @@ module Engine
               count += 1
             end
             @log << "Market closes #{count} short(s) for #{corporation.name}" if count.positive?
+          end
+        end
+
+        # Force-close all short positions on a corp being absorbed in a merger.
+        # Each shorter pays the buyout price. If they can't afford it, their positive
+        # shares in other corps are sold first. If still insolvent, they go bankrupt.
+        def close_merger_shorts(corporation, price_per_share)
+          shorts(corporation).each do |short_share|
+            holder = short_share.owner
+            next unless holder.respond_to?(:cash)
+
+            unless holder.cash >= price_per_share
+              @log << "#{holder.name} must sell shares to cover short in #{corporation.name}"
+              # Sell non-president shares first, then president shares, skipping absorbed corp
+              holder.shares_by_corporation
+                    .sort_by { |_, shares| shares.any?(&:president) ? 1 : 0 }
+                    .each do |corp, shares|
+                break if holder.cash >= price_per_share
+                next if corp == corporation
+
+                shares.select { |s| s.percent.positive? }
+                      .sort_by { |s| s.president ? 1 : 0 }
+                      .each do |share|
+                  break if holder.cash >= price_per_share
+
+                  bundle = Engine::ShareBundle.new([share])
+                  sell_shares_and_change_price(bundle)
+                  @log << "#{holder.name} is forced to sell 1 share of #{corp.name}"
+                end
+              end
+            end
+
+            pool_share = @share_pool.shares_of(corporation).find { |s| s.percent == corporation.share_percent }
+            remove_share(pool_share) if pool_share
+            remove_share(short_share)
+
+            if holder.cash >= price_per_share
+              holder.spend(price_per_share, @bank)
+              @log << "#{holder.name}'s short in #{corporation.name} is force-closed " \
+                      "at #{format_currency(price_per_share)}"
+            else
+              holder.spend(holder.cash, @bank)
+              @log << "#{holder.name} cannot cover short in #{corporation.name} — bankrupt"
+              declare_bankrupt(holder)
+            end
           end
         end
 
@@ -767,9 +823,14 @@ module Engine
             return
           end
 
-          # C3: player-redeemable reserved share; if corp buys unredeemed, share stays in IPO
-          if company.id == 'C3' && buyer.is_a?(Engine::Corporation)
-            handle_c3_company_purchase(buyer, company)
+          # C3: when a player buys it, immediately redeem the reserved share.
+          #     When a corporation buys it unredeemed, the share returns to the IPO.
+          if company.id == 'C3'
+            if buyer.is_a?(Engine::Player)
+              handle_c3_player_redemption(buyer, company)
+            else
+              handle_c3_company_purchase(buyer, company)
+            end
             return
           end
 
@@ -830,7 +891,7 @@ module Engine
             return
           end
 
-          share = corp.shares.find { |s| !s.president && s.owner == corp }
+          share = corp.shares.find { |s| !s.president && s.owner == corp && s.buyable }
           unless share
             @log << "#{corp.name} has no IPO shares available for #{company.name}"
             return
@@ -865,6 +926,26 @@ module Engine
             @log << "#{company.name} sold unredeemed — reserved #{reserved_corp&.name} share returns to IPO"
           end
           @log << "#{corp.name} owns #{company.name}"
+        end
+
+        # C3: when a player wins it in the private auction, immediately transfer
+        # the reserved central corp share to them. C3 revenue drops to ₫0 but
+        # the private is kept (still blocks K18 upgrades while a player holds it).
+        def handle_c3_player_redemption(player, company)
+          reserved_corp = corporation_by_id(@c3_reserved_corp_sym)
+          share = @reserved_shares['C3']
+          unless share
+            @log << "#{company.name}: no reserved share found for #{reserved_corp&.name}"
+            return
+          end
+
+          @reserved_redeemed['C3'] = true
+          share.buyable = true
+          @reserved_shares.delete('C3')
+          share_pool.buy_shares(player, share, exchange: :free, allow_president_change: false)
+          company.revenue = 0
+          @log << "#{player.name} redeems #{company.name} for one share of #{reserved_corp&.name}"
+          @log << "#{company.name} revenue drops to #{format_currency(0)}"
         end
 
         # C3: player-redeemable reserved share. When a corporation buys it unredeemed,

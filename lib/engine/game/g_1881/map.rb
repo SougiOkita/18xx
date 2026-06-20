@@ -99,6 +99,11 @@ module Engine
 
           # --- Custom upgrade tiles for Hai Van Pass (HV label) ---
           # Green: town (pass) + city offset, paths on sides 3→2 and 1→0
+          'HV1' => {
+            'count' => 1,
+            'color' => 'yellow',
+            'code' => 'city=revenue:50,slots:1;path=a:0,b:_0;path=a:2,b:_0;label=HV',
+          },
           'HV2' => {
             'count' => 1,
             'color' => 'green',
@@ -248,8 +253,8 @@ module Engine
           # GRAY hexes (permanent, non-upgradeable)
           # =====================================================================
           gray: {
-            # Northern border towns (value 10): gentle side 6 → Ruby 5; town stub
-            %w[C2 E2 G2] => 'town=revenue:10;path=a:1,b:_0;path=a:5,b:_0',
+            # Northern border bonuses (value 20, no stop): gentle side 6 → Ruby 5
+            %w[C2 E2 G2] => 'town=revenue:20,visit_cost:0,route:optional;path=a:1,b:_0;path=a:5,b:_0',
 
             # D11: straight side 6 → Ruby 5; straight 5↔2
             ['D11'] => 'path=a:2,b:5',
@@ -294,10 +299,6 @@ module Engine
           # =====================================================================
           # YELLOW hexes (pre-placed yellow tiles, upgradeable)
           # =====================================================================
-          yellow: {
-            # K18: Hai Van Pass (pre-placed town with HV label, upgrades to HV2/HV3)
-            ['K18'] => 'city=revenue:0;label=HV',
-          },
 
           # =====================================================================
           # WHITE hexes (blank, upgradeable)
@@ -332,6 +333,8 @@ module Engine
 
             # Saigon (SG label, STC home)
             ['G32'] => 'city=revenue:0;label=SG',
+            
+            ['K18'] => 'city=revenue:0;label=HV',
 
             # Hai Phong (HPR home)
             ['I6'] => 'city=revenue:0',

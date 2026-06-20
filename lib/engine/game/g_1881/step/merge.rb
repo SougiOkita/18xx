@@ -82,6 +82,10 @@ module Engine
               @log << "#{player.name} receives #{@game.format_currency(payout)} for #{num_shares} share(s) of #{absorbed.name}"
             end
 
+            # Force-close any short positions on the absorbed corp before it closes.
+            # Shorter pays the buyout price; insolvency triggers forced share sales then bankruptcy.
+            @game.close_merger_shorts(absorbed, price_per_share)
+
             # Move survivor's share price right (one step) to reflect the combined entity
             old_price = survivor.share_price
             @game.stock_market.move_right(survivor)
