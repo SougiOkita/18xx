@@ -119,8 +119,8 @@ module Engine
             @receiver = entities.size == 4 ? entities[(entity_index + 3) % entities.size] : nil
             @auctioning = company
 
-            @player1.unpass!
-            @player2.unpass!
+            # Only the other players may bid; the auctioneer never bids
+            [@player1, @player2, @receiver].compact.each(&:unpass!)
 
             @log << "#{player.name} offers #{company.name} for auction"
             goto_entity!(@player1)
@@ -138,13 +138,17 @@ module Engine
           end
 
           def build_concession_queue
+            north = company(%w[CFI-C HPR-C].sort_by { @game.rand }.first)
+            south = company(%w[STC-C TMR-C].sort_by { @game.rand }.first)
+            @log << "North Concession in play: #{north.name}"
+            @log << "South Concession in play: #{south.name}"
+
             if @game.players.size == 3
-              central_id = %w[CFCA-C RCL-C].sort_by { @game.rand }.first
-              central = company(central_id)
-              @log << "Central concession in play: #{central.name}"
-              [company('CFI-C'), central, company('STC-C')].sort_by { @game.rand }
+              central = company(%w[CFCA-C RCL-C].sort_by { @game.rand }.first)
+              @log << "Central Concession in play: #{central.name}"
+              [north, central, south].sort_by { @game.rand }
             else
-              [company('CFI-C'), company('CFCA-C'), company('RCL-C'), company('STC-C')].sort_by { @game.rand }
+              [north, company('CFCA-C'), company('RCL-C'), south].sort_by { @game.rand }
             end
           end
 
@@ -260,9 +264,15 @@ module Engine
             s_pool = privates_for_group('S', num_players).sort_by { @game.rand }
             c_pool = privates_for_group('C', num_players).sort_by { @game.rand }
 
+            # Determine which North and South concession corps won
+            north_concession = %w[CFI-C HPR-C].map { |id| company(id) }.find(&:owned_by_player?)
+            south_concession = %w[STC-C TMR-C].map { |id| company(id) }.find(&:owned_by_player?)
+            north_sym = north_concession.id.delete_suffix('-C')
+            south_sym = south_concession.id.delete_suffix('-C')
+
             if num_players == 3
-              north_winner = company('CFI-C').owner
-              south_winner = company('STC-C').owner
+              north_winner = north_concession.owner
+              south_winner = south_concession.owner
               central_concession = %w[CFCA-C RCL-C].map { |id| company(id) }.find(&:owned_by_player?)
               central_winner = central_concession.owner
 
@@ -270,14 +280,12 @@ module Engine
               assign_pile(south_winner,   s_pool.shift(2) + [n_pool.shift, c_pool.shift])
               assign_pile(central_winner, c_pool.shift(2) + [n_pool.shift, s_pool.shift])
 
-              # C1/C2 both map to the single floated central corp; C3 reserved share same corp
               central_sym = central_concession.id.delete_suffix('-C')
               @game.setup_central_share_data(
                 share_assignments: { 'C1' => central_sym, 'C2' => central_sym },
                 c3_reserved_corp: central_sym
               )
             else
-              # 4p: identify the two central winners
               central_winners = %w[CFCA-C RCL-C].map { |id| company(id).owner }
 
               @game.players.each do |player|
@@ -286,7 +294,6 @@ module Engine
                 assign_pile(player, pile.compact)
               end
 
-              # 4p: randomly split C1/C2/C1+/C2+ — two give CFCA shares, two give RCL shares
               share_privates = %w[C1 C2 C1+ C2+].sort_by { @game.rand }
               share_assignments = {}
               share_privates[0..1].each { |id| share_assignments[id] = 'CFCA' }
@@ -297,6 +304,14 @@ module Engine
                 c3_reserved_corp: c3_corp
               )
             end
+
+            @game.setup_north_share_data(north_sym)
+            @game.setup_south_share_data(south_sym)
+
+            # Build tranche pool from all unfloated eligible corps (after concessions are resolved).
+            # Losing corps of each pair join the pool alongside non-concession corps.
+            # 3p: 7 unfloated → tranches 3-2-2; 4p: 6 unfloated → tranches 3-2-1
+            @game.setup_tranches
           end
 
           def privates_for_group(prefix, num_players)
@@ -304,13 +319,10 @@ module Engine
               next false unless c.id.start_with?(prefix)
               next false if c.id.end_with?('-C')  # skip concession companies
 
-              # Only 4p-labeled privates are excluded from smaller games.
-              # 3p-labeled privates are included in all player counts.
               if prefix == 'C'
+                # C1+/C2+ are 4p-only; all others are always included
                 c.name.include?('(4p)') ? num_players == 4 : true
               else
-                next false if c.name.include?('(4p)') && num_players != 4
-
                 true
               end
             end
@@ -341,13 +353,18 @@ module Engine
             @log << "#{player.name} passes on #{@auctioning.name}"
             player.pass!
 
-            unless @bids[@auctioning].empty?
-              win_private!(highest_bid(@auctioning))
+            # The auctioneer does not bid; only the other players are active
+            active = [@player1, @player2, @receiver].compact.reject(&:passed?)
+
+            if active.empty?
+              @bids[@auctioning].empty? ? force_private!(@auctioning) : win_private!(highest_bid(@auctioning))
               return
             end
 
-            if @player1.passed? && @player2.passed?
-              force_private!(@auctioning)
+            # One bidder remains and already holds the top bid — resolve immediately.
+            if active.size == 1 && !@bids[@auctioning].empty? &&
+               highest_bid(@auctioning).entity == active.first
+              win_private!(highest_bid(@auctioning))
               return
             end
 
@@ -365,23 +382,14 @@ module Engine
           end
 
           def force_private!(company)
-            if @receiver&.cash.to_i >= company.value
-              value = company.value
-              assign_private!(@receiver, company, @auctioneer, value)
-              @log << "#{@receiver.name} is forced to buy #{company.name} for #{@game.format_currency(value)}"
-            else
-              force_on_highest_cash!(company)
-            end
-            end_private_auction!
-          end
-
-          def force_on_highest_cash!(company)
-            while (highest = entities.max_by(&:cash)).cash < company.value
-              @log << "No player can afford #{company.name}, paying out revenues"
+            auctioneer = @auctioneer
+            while auctioneer.cash < company.value
+              @log << "#{auctioneer.name} cannot afford #{company.name}, paying out revenues"
               @game.payout_companies
             end
-            assign_private!(highest, company, @auctioneer, company.value)
-            @log << "#{highest.name} is forced to buy #{company.name} for #{@game.format_currency(company.value)}"
+            assign_private!(auctioneer, company, auctioneer, company.value)
+            @log << "#{auctioneer.name} is forced to buy #{company.name} for #{@game.format_currency(company.value)}"
+            end_private_auction!
           end
 
           def assign_private!(player, company, auctioneer, price)
@@ -400,20 +408,25 @@ module Engine
             next_player = @player1
             goto_entity!(@player1)
 
-            @player1.unpass!
-            @player2&.unpass!
+            [@player1, @player2, @receiver, @auctioneer].compact.each(&:unpass!)
             @auctioneer = @auctioning = @player1 = @player2 = @receiver = nil
 
             auto_offer_if_sole!(next_player)
           end
 
           def next_private_bidder!
-            if entity_index == entities.index(@player1)
-              goto_entity!(@player2)
-            else
-              goto_entity!(@player1)
+            # Turn order: player1 → player2 → receiver (4p only); auctioneer never bids
+            bidder_list = [@player1, @player2, @receiver].compact
+            current_idx = bidder_list.index(current_entity) || bidder_list.size - 1
+
+            bidder_list.size.times do |i|
+              candidate = bidder_list[(current_idx + 1 + i) % bidder_list.size]
+              next if candidate.passed?
+
+              goto_entity!(candidate)
+              auto_pass_if_forced!
+              return
             end
-            auto_pass_if_forced!
           end
 
           def auto_pass_if_forced!

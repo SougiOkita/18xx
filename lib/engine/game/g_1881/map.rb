@@ -84,7 +84,7 @@ module Engine
           'SG' => {
             'count' => 1,
             'color' => 'yellow',
-            'code' => 'city=revenue:30;path=a:0,b:_0;path=a:3,b:_0;label=SG',
+            'code' => 'city=revenue:30;path=a:0,b:_0;path=a:4,b:_0;label=SG',
           },
           'SG2' => {
             'count' => 1,
@@ -296,7 +296,7 @@ module Engine
           # =====================================================================
           yellow: {
             # K18: Hai Van Pass (pre-placed town with HV label, upgrades to HV2/HV3)
-            ['K18'] => 'town=revenue:0;label=HV',
+            ['K18'] => 'city=revenue:0;label=HV',
           },
 
           # =====================================================================
@@ -314,14 +314,14 @@ module Engine
               'upgrade=cost:60,terrain:mountain',
 
             # Mountain 30
-            %w[J23 J25 I22] => 'upgrade=cost:30,terrain:mountain',
+            %w[J23 J25 I22 D5 E4 F5] => 'upgrade=cost:30,terrain:mountain',
 
             # Water 60 (river crossing)
             %w[E32 K22 C34 D35 E36 I16] =>
               'upgrade=cost:60,terrain:water',
 
             # Water 40
-            %w[H5 H7] => 'upgrade=cost:40,terrain:water',
+            %w[H5 H7 E8 F7 G8 H31 I32 L27] => 'upgrade=cost:40,terrain:water',
 
             # Forest 30 (approximated as mountain terrain for cost)
             ['I20'] => 'upgrade=cost:30,terrain:mountain',
@@ -383,7 +383,7 @@ module Engine
             ['C4'] => 'town=revenue:0;town=revenue:0;upgrade=cost:60,terrain:mountain',
 
             # Ninh Binh & Nam Dinh (F7)
-            ['F7'] => 'town=revenue:0;town=revenue:0',
+            ['F7'] => 'town=revenue:0;town=revenue:0;upgrade=cost:30,terrain:water',
 
             # Tan Mai & Hoang Mai (G12)
             ['G12'] => 'town=revenue:0;town=revenue:0',
@@ -402,7 +402,7 @@ module Engine
 
             # --- Single-town hexes ---
             # Bien Hoa (G30)
-            ['G30'] => 'town=revenue:0',
+            ['G30'] => 'town=revenue:0;upgrade=cost:30,terrain:mountain',
 
             # Ha Long (J5, water 40)
             ['J5'] => 'town=revenue:0;upgrade=cost:40,terrain:water',

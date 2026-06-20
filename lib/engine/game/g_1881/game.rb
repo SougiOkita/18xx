@@ -5,6 +5,9 @@ require_relative 'map'
 require_relative 'meta'
 require_relative 'round/auction'
 require_relative 'step/auction'
+require_relative 'step/buy_sell_par_shares'
+require_relative 'step/buy_train'
+require_relative 'step/dividend'
 require_relative 'step/redeem_shares'
 require_relative 'step/issue_shares'
 require_relative 'step/merge'
@@ -23,10 +26,12 @@ module Engine
 
         # Unlimited bank (represented as very large number)
         BANK_CASH = 99_999
+        TOTAL_STARTING_CASH = 1800
+
 
         CERT_LIMIT = { 3 => 20, 4 => 16 }.freeze
 
-        STARTING_CASH = { 3 => 700, 4 => 525 }.freeze
+        STARTING_CASH = {}.freeze
 
         CAPITALIZATION = :incremental
 
@@ -46,18 +51,14 @@ module Engine
           %w[54 59 65p 72p 78p 84p 90p 100p 110 121 133 147 162 182 201 222],
           # Row 4
           %w[50 54 60 66 73 80 87 94 102 112 123 136 151 169 190],
-          # Row 5 (cols 14-18 are reserved mainline slots — blank)
-          ['45', '50', '56', '62', '68', '75', '83', '91', '100', '110', '122', '134', '146', '158',
-           '', '', '', '', ''],
-          # Row 6 (cols 14-18 are reserved shortline slots — blank)
-          ['40', '45', '50', '55', '62', '69', '77', '84', '92', '100', '108', '117', '128', '142',
-           '', '', '', '', ''],
-          # Row 7
-          ['30', '34', '38', '42', '47', '53', '59', '66', '73', '81', '90', '99',
-           '', '', '', '', '', '', ''],
-          # Row 8 (bottom) – close cell at col 0
-          ['0c', '24', '28', '31', '35', '40', '44', '52', '60',
-           '', '', '', '', '', '', '', ''],
+          # Row 5 – right edge at 158 (⭡ arrow: moving right wraps up to row 4)
+          %w[45 50 56 62 68 75 83 91 100 110 122 134 146 158],
+          # Row 6 – right edge at 142 (⭡ arrow: wraps up to row 5)
+          %w[40 45 50 55 62 69 77 84 92 100 108 117 128 142],
+          # Row 7 – right edge at 99 (⭡ arrow: wraps up to row 6)
+          %w[30 34 38 42 47 53 59 66 73 81 90 99],
+          # Row 8 (bottom) – close cell at col 0; right edge at 60 (⭡ arrow: wraps up to row 7)
+          %w[0c 24 28 31 35 40 44 52 60],
         ].freeze
 
         STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(
@@ -387,6 +388,11 @@ module Engine
           @eight_plus_purchased = true
         end
 
+        def init_starting_cash(players, bank)
+          cash = self.class::TOTAL_STARTING_CASH / players.size
+          players.each { |p| bank.spend(cash, p) }
+        end
+
         # =====================================================================
         # PAR ZONE MANAGEMENT
         # =====================================================================
@@ -395,18 +401,61 @@ module Engine
           @eight_plus_purchased = false
           @central_share_assignments = {}
           @c3_reserved_corp_sym = nil
-          @c3_redeemed = false
+          @reserved_redeemed = {}
+          @reserved_shares = {}   # private_id => Share object marked buyable:false
           @laos_contract_owner = nil
+          # Set after concession phase by setup_north/south_share_data
+          @north_concession_corp = nil
+          @south_concession_corp = nil
+
+          # Tranche state — setup_tranches is called from step/auction after concessions resolve
+          @tranches = []
+          @current_tranche_idx = 0
+          @tranche_exhausted = false
+          @stock_round_count = 0
         end
 
         # Called from step/auction.rb after distribute_privates! to record
-        # which central corp each share certificate maps to.
+        # which central corp each share certificate maps to, and to reserve
+        # the C3 share in the appropriate central corp.
         def setup_central_share_data(share_assignments:, c3_reserved_corp:)
           @central_share_assignments = share_assignments
           @c3_reserved_corp_sym = c3_reserved_corp
           @log << "Central share certificate assignments: " \
                   "#{share_assignments.map { |id, sym| "#{id}→#{sym}" }.join(', ')}"
           @log << "C3 reserved share: #{c3_reserved_corp}"
+          reserve_one_ipo_share(c3_reserved_corp, 'C3')
+        end
+
+        def setup_north_share_data(corp_sym)
+          @north_concession_corp = corp_sym
+          @log << "North Concession corporation: #{corp_sym} (N2/N3/N4 interact with #{corp_sym})"
+          reserve_one_ipo_share(corp_sym, 'N3')
+          reserve_one_ipo_share(corp_sym, 'N4')
+        end
+
+        def setup_south_share_data(corp_sym)
+          @south_concession_corp = corp_sym
+          @log << "South Concession corporation: #{corp_sym} (S1/S2/S4 interact with #{corp_sym})"
+          reserve_one_ipo_share(corp_sym, 'S4')
+        end
+
+        # Mark one non-president IPO share of corp_sym as non-buyable (reserved).
+        def reserve_one_ipo_share(corp_sym, private_id)
+          corp = corporation_by_id(corp_sym)
+          return unless corp
+
+          share = corp.shares.find { |s| !s.president && s.owner == corp && s.buyable }
+          return unless share
+
+          share.buyable = false
+          @reserved_shares[private_id] = share
+        end
+
+        # Restore the reserved share to normal IPO availability.
+        def release_reserved_share(private_id)
+          share = @reserved_shares.delete(private_id)
+          share&.buyable = true
         end
 
         def par_prices
@@ -426,6 +475,215 @@ module Engine
         end
 
         # =====================================================================
+        # +1 TRAIN LIMIT SYSTEM
+        # =====================================================================
+
+        def plus1_train_limit
+          self.class::PLUS1_TRAIN_LIMITS.fetch(@phase.name, 1)
+        end
+
+        def plus1_trains_for(entity)
+          entity.trains.reject { |t| t.obsolete || t.name != '+1' }
+        end
+
+        # Exclude +1 trains from the normal train count so each limit is checked independently.
+        def num_corp_trains(entity)
+          entity.trains.count { |t| !t.obsolete && t.name != '+1' }
+        end
+
+        # A corp is crowded if it exceeds either normal or +1 limits.
+        def crowded_corps
+          @crowded_corps ||= (minors + corporations).select do |c|
+            num_corp_trains(c) > train_limit(c) ||
+              plus1_trains_for(c).size > plus1_train_limit
+          end
+        end
+
+        # =====================================================================
+        # TRANCHE SYSTEM (SR float order for non-concession corps)
+        # =====================================================================
+
+        # Called from step/auction after all concessions are resolved.
+        # Builds the tranche pool from unfloated eligible corps.
+        # 3p: 7 corps unfloated → sizes [3, 2, 2]
+        # 4p: 6 corps unfloated → sizes [3, 2, 1]
+        def setup_tranches
+          corps = self.class::TRANCHE_ELIGIBLE_CORPS
+                       .map { |id| corporation_by_id(id) }
+                       .compact
+                       .reject(&:floated?)
+                       .sort_by { rand }
+
+          sizes = corps.size >= 7 ? [3, 2, 2] : [3, 2, 1]
+          remaining = corps.dup
+          @tranches = sizes.map { |n| remaining.shift(n) }
+          log_tranche_assignments
+        end
+
+        def log_tranche_assignments
+          @tranches.each.with_index(1) do |corps, i|
+            @log << "Float tranche #{i}: #{corps.map(&:id).join(', ')}"
+          end
+        end
+
+        def current_tranche
+          @tranches[@current_tranche_idx] || []
+        end
+
+        def in_current_tranche?(corporation)
+          current_tranche.include?(corporation)
+        end
+
+        def can_par?(corporation, parrer)
+          return super unless self.class::TRANCHE_ELIGIBLE_CORPS.include?(corporation.id)
+          return false unless super
+          return false unless in_current_tranche?(corporation)
+          return false if @tranche_exhausted
+
+          true
+        end
+
+        def float_corporation(corporation)
+          super
+
+          return unless self.class::TRANCHE_ELIGIBLE_CORPS.include?(corporation.id)
+          return if @tranches.empty?   # concession phase — tranches not yet built
+          return if @tranche_exhausted
+          return unless current_tranche.all?(&:floated?)
+
+          @tranche_exhausted = true
+          @log << "Tranche #{@current_tranche_idx + 1} exhausted — " \
+                  'no further corporations may be parred this Stock Round'
+        end
+
+        def stock_round
+          Engine::Round::Stock.new(self, [
+            Engine::Step::DiscardTrain,
+            Engine::Step::Exchange,
+            Engine::Step::SpecialTrack,
+            G1881::Step::BuySellParShares,
+          ])
+        end
+
+        def new_stock_round
+          close_bank_shorts
+          if @stock_round_count.positive?
+            @current_tranche_idx = [@current_tranche_idx + 1, @tranches.size].min
+            @tranche_exhausted = false
+            if @current_tranche_idx < @tranches.size
+              @log << "Float tranche #{@current_tranche_idx + 1} now active: " \
+                      "#{current_tranche.map(&:id).join(', ')}"
+            else
+              @log << 'All float tranches exhausted — no new corporations may be parred'
+            end
+          end
+          @stock_round_count += 1
+          super
+        end
+
+        # =====================================================================
+        # SHORT SELLING
+        # =====================================================================
+
+        # All short positions across all holders for this corporation.
+        def shorts(corporation)
+          @_shares.values.select { |s| s.corporation == corporation && s.percent.negative? }
+        end
+
+        # Short positions held by a specific entity for this corporation.
+        def entity_shorts(entity, corporation)
+          entity.shares_of(corporation).select { |s| s.percent.negative? }
+        end
+
+        # Register a new synthetic share (short or its matching positive) in all indexes.
+        def add_new_share(share)
+          owner = share.owner
+          corporation = share.corporation
+          corporation.share_holders[owner] += share.percent if owner
+          owner.shares_by_corporation[corporation] << share
+          @_shares[share.id] = share
+        end
+
+        # Remove a synthetic share from all indexes.
+        def remove_share(share)
+          owner = share.owner
+          corporation = share.corporation
+          corporation.share_holders[owner] -= share.percent if owner
+          owner.shares_by_corporation[corporation].delete(share)
+          @_shares.delete(share.id)
+        end
+
+        # Create a short: player receives cash, one negative-percent share goes to the player
+        # and one matching positive share is placed in the share pool.
+        def short(entity, corporation)
+          price   = corporation.share_price.price
+          percent = corporation.share_percent
+
+          highest = [@_shares.values
+                              .select { |s| s.corporation == corporation }
+                              .map(&:index).max || 0, 9].max
+
+          pool_share  = Share.new(corporation, owner: @share_pool, percent:  percent, index: highest + 1)
+          short_share = Share.new(corporation, owner: entity,      percent: -percent, index: highest + 2)
+          short_share.buyable = false
+          short_share.counts_for_limit = false
+
+          @log << "#{entity.name} shorts a #{percent}% share of #{corporation.name} " \
+                  "for #{format_currency(price)}"
+          @bank.spend(price, entity)
+          add_new_share(short_share)
+          add_new_share(pool_share)
+        end
+
+        # Cover a short: remove both the positive share (just bought by entity) and its
+        # matching negative-percent counterpart.
+        def unshort(entity, share)
+          shares = entity.shares_of(share.corporation)
+          remove_share(share)
+          short = shares.find { |s| s.percent == -share.percent }
+          remove_share(short)
+        end
+
+        # If the market holds both a positive share and a short for the same corporation,
+        # cancel them out (this happens after any sell that deposits shares in the pool).
+        def close_market_shorts
+          @corporations.each do |corporation|
+            count = 0
+            while entity_shorts(@share_pool, corporation).any? &&
+                  (pool_longs = @share_pool.shares_of(corporation)
+                                            .select { |s| s.percent.positive? && !s.president }).any?
+              unshort(@share_pool, pool_longs.first)
+              count += 1
+            end
+            @log << "Market closes #{count} short(s) for #{corporation.name}" if count.positive?
+          end
+        end
+
+        # At the start of each SR, the bank buys treasury shares to close any remaining
+        # market (share-pool) shorts.
+        def close_bank_shorts
+          @corporations.each do |corporation|
+            next unless corporation.share_price
+            next if corporation.share_price.acquisition? || corporation.share_price.liquidation?
+
+            count = 0
+            while entity_shorts(@share_pool, corporation).any? && corporation.shares.any?
+              share = corporation.shares.first
+              @share_pool.buy_shares(@share_pool, share)
+              unshort(@share_pool, share)
+              count += 1
+            end
+            @log << "Market closes #{count} short(s) for #{corporation.name}" if count.positive?
+          end
+        end
+
+        # After any sell, try to close market shorts immediately.
+        def sell_shares_and_change_price(bundle, allow_president_change: true, swap: nil, movement: nil)
+          super
+          close_market_shorts
+        end
+
+        # =====================================================================
         # INITIAL AUCTION ROUND
         # =====================================================================
         def init_round
@@ -435,8 +693,39 @@ module Engine
         # Mapping of private company → minor corporation it floats.
         MINOR_PRIVATE_MAP = { 'N1' => 'SFTC', 'S3' => 'FMT' }.freeze
 
-        # Central share certificate IDs (C1/C2 in 3p, C1/C2/C1+/C2+ in 4p).
+        # Share certificate IDs: buyer receives an IPO share of the named corp.
         CENTRAL_SHARE_CERT_IDS = %w[C1 C2 C1+ C2+].freeze
+        NORTH_SHARE_CERT_IDS   = %w[N2].freeze
+        SOUTH_SHARE_CERT_IDS   = %w[S1 S2].freeze
+
+        # Corps eligible for the SR float-order tranche system.
+        # All concession pair corps are included; the winner of each pair is floated during
+        # the concession phase and filtered out by setup_tranches (reject(&:floated?)).
+        # The loser of each pair remains unfloated and joins the tranche pool.
+        # 3p: 3 corps floated (1 North + 1 South + 1 Central) → 7 unfloated → tranches 3-2-2
+        # 4p: 4 corps floated (1 North + 1 South + CFCA + RCL) → 6 unfloated → tranches 3-2-1
+        TRANCHE_ELIGIBLE_CORPS = %w[CFI HPR STC TMR CFCA RCL TIR TTC AT CPA].freeze
+
+        # Concession pair corp IDs — one from each pair is randomly chosen each game.
+        NORTH_CONCESSION_PAIR = %w[CFI HPR].freeze
+        SOUTH_CONCESSION_PAIR = %w[STC TMR].freeze
+
+        # Privates that reserve a share when company buys them.
+        NORTH_RESERVED_PRIVATE_IDS = %w[N4].freeze
+        SOUTH_RESERVED_PRIVATE_IDS = %w[S4].freeze
+
+        # Per-phase limits for +1 trains (separate from normal train limits).
+        PLUS1_TRAIN_LIMITS = {
+          '+1'  => 1,
+          '2'   => 1,
+          '3'   => 1,
+          '4'   => 2,
+          '5'   => 2,
+          '5+1' => 2,
+          '6'   => 3,
+          '8+'  => 3,
+          'R2+1' => 3,
+        }.freeze
 
         # Called when any company is purchased (auction phase or SR).
         def after_buy_company(buyer, company, price)
@@ -448,7 +737,37 @@ module Engine
             return
           end
 
-          # C3: when a corporation buys it, the reserved share transfers to them
+          # North share certificates: buyer receives a North Concession corp share, bid → corp
+          if self.class::NORTH_SHARE_CERT_IDS.include?(company.id)
+            handle_concession_share_certificate(buyer, company, price, @north_concession_corp)
+            return
+          end
+
+          # South share certificates: buyer receives a South Concession corp share, bid → corp
+          if self.class::SOUTH_SHARE_CERT_IDS.include?(company.id)
+            handle_concession_share_certificate(buyer, company, price, @south_concession_corp)
+            return
+          end
+
+          # N4: corp may redeem the reserved North Concession share (corp-redeemable, not player)
+          if self.class::NORTH_RESERVED_PRIVATE_IDS.include?(company.id) && buyer.is_a?(Engine::Corporation)
+            handle_n4_company_purchase(buyer, company)
+            return
+          end
+
+          # N3: player-redeemable reserved share; if corp buys unredeemed, share stays in North IPO
+          if company.id == 'N3' && buyer.is_a?(Engine::Corporation)
+            handle_reserved_private_company_purchase(buyer, company, @north_concession_corp)
+            return
+          end
+
+          # S4: player-redeemable reserved share; if corp buys unredeemed, share stays in South IPO
+          if self.class::SOUTH_RESERVED_PRIVATE_IDS.include?(company.id) && buyer.is_a?(Engine::Corporation)
+            handle_reserved_private_company_purchase(buyer, company, @south_concession_corp)
+            return
+          end
+
+          # C3: player-redeemable reserved share; if corp buys unredeemed, share stays in IPO
           if company.id == 'C3' && buyer.is_a?(Engine::Corporation)
             handle_c3_company_purchase(buyer, company)
             return
@@ -492,15 +811,19 @@ module Engine
           @log << "#{corporation.name} receives #{format_currency(seed)}"
         end
 
-        # Central share certificate purchased: buyer gets one IPO share of the
-        # mapped corp, and the bid price is redirected from the bank to that corp.
+        # Central share certificate purchased: look up the mapped corp and delegate.
         def handle_central_share_certificate(buyer, company, price)
           corp_sym = @central_share_assignments[company.id]
           unless corp_sym
             @log << "#{company.name}: no central corp assignment found"
             return
           end
+          handle_concession_share_certificate(buyer, company, price, corp_sym)
+        end
 
+        # Common handler for all share certificates (C1/C2, N2, S1/S2/S5):
+        # buyer receives one IPO share of corp_sym for free; bid price → corp.
+        def handle_concession_share_certificate(buyer, company, price, corp_sym)
           corp = corporation_by_id(corp_sym)
           unless corp
             @log << "#{company.name}: corporation #{corp_sym} not found"
@@ -521,23 +844,39 @@ module Engine
           @log << "#{corp.name} receives #{format_currency(price)} (#{company.name} proceeds)"
         end
 
-        # When a corporation purchases C3 during the SR, the reserved central
-        # concession share transfers to that corporation (if not already redeemed).
-        def handle_c3_company_purchase(corp, company)
-          unless @c3_redeemed
-            reserved_corp = corporation_by_id(@c3_reserved_corp_sym)
-            if reserved_corp
-              share = reserved_corp.shares.find { |s| !s.president && s.owner == reserved_corp }
-              if share
-                share_pool.buy_shares(corp, share, exchange: :free, allow_president_change: false)
-                @log << "#{corp.name} receives the C3 reserved share of #{reserved_corp.name}"
-                @c3_redeemed = true
-              else
-                @log << "#{reserved_corp.name} has no IPO shares remaining for C3 reserved share"
-              end
-            end
+        # N4: when a corporation purchases it, the corp (not the player) may redeem the
+        # reserved CFI share. Unredeemed share stays in CFI's IPO.
+        # Redemption mechanic requires a custom action step (TODO).
+        # N4: corp-redeemable reserved share. Buying corp may later redeem the CFI share
+        # (drops income to ₫0). If not yet redeemed, the share stays reserved until then.
+        def handle_n4_company_purchase(corp, company)
+          unless @reserved_redeemed[company.id]
+            @log << "#{corp.name} now holds #{company.name} and may redeem the reserved CFI share"
           end
-          @log << "#{corp.name} owns #{company.name} and may close it for a free tile+token on K18"
+          @log << "#{corp.name} owns #{company.name}"
+        end
+
+        # S4: player-redeemable reserved share. When a corporation buys it unredeemed,
+        # the reserved STC share is released back to the normal IPO.
+        def handle_reserved_private_company_purchase(corp, company, corp_sym)
+          unless @reserved_redeemed[company.id]
+            reserved_corp = corporation_by_id(corp_sym)
+            release_reserved_share(company.id)
+            @log << "#{company.name} sold unredeemed — reserved #{reserved_corp&.name} share returns to IPO"
+          end
+          @log << "#{corp.name} owns #{company.name}"
+        end
+
+        # C3: player-redeemable reserved share. When a corporation buys it unredeemed,
+        # the reserved central corp share is released back to the normal IPO.
+        # The corporation may close C3 for a free tile upgrade on K18 (token costs normal).
+        def handle_c3_company_purchase(corp, company)
+          unless @reserved_redeemed['C3']
+            reserved_corp = corporation_by_id(@c3_reserved_corp_sym)
+            release_reserved_share('C3')
+            @log << "#{company.name} sold unredeemed — reserved #{reserved_corp&.name} share returns to IPO"
+          end
+          @log << "#{corp.name} owns #{company.name} and may close it for a free tile upgrade on K18"
         end
 
         # When a corporation purchases C4 during the SR, it is immediately
@@ -581,9 +920,9 @@ module Engine
             Engine::Step::Track,          # 2. Lay/upgrade tiles (phase-based)
             Engine::Step::Token,          # 3. Place station token
             Engine::Step::Route,          # 4. Run trains (TODO: custom route logic)
-            Engine::Step::Dividend,       # 5. Pay dividend (TODO: custom dividend)
+            G1881::Step::Dividend,        # 5. Pay dividend
             Engine::Step::DiscardTrain,
-            Engine::Step::BuyTrain,       # 6. Buy trains (+1 always available via depot)
+            G1881::Step::BuyTrain,        # 6. Buy trains (separate limits for +1 vs normal)
             G1881::Step::IssueShares,     # 7. Issue shares (end of OR)
             G1881::Step::Merge,           # 8. Merge (phases 2 & 3 only)
           ], round_num: round_num)

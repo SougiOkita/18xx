@@ -6,8 +6,9 @@ module Engine
       module Entities
         COMPANIES = [
           # === Concessions (immediately float a major corporation) ===
+          # 1a/1b = North pair (random pick); 2a/2b = Central pair; 3a/3b = South pair (random pick)
           {
-            name: 'Concession 1 – CFI',
+            name: 'Concession 1a – CFI',
             sym: 'CFI-C',
             value: 130,
             revenue: 0,
@@ -16,17 +17,16 @@ module Engine
             color: nil,
           },
           {
-            name: 'Concession 2 – STC',
-            sym: 'STC-C',
+            name: 'Concession 1b – HPR',
+            sym: 'HPR-C',
             value: 130,
             revenue: 0,
-            desc: 'Once purchased, immediately float and gain the director share for Société générale des '\
-                  'tramways à vapeur de Cochinchine. Par price equals half the bid price, rounded down to '\
-                  'the nearest par price.',
+            desc: 'Once purchased, immediately float and gain the director share for Chemin de fer de '\
+                  'Hai Phong. Par price equals half the bid price, rounded down to the nearest par price.',
             color: nil,
           },
           {
-            name: 'Concession 3a – CFCA',
+            name: 'Concession 2a – CFCA',
             sym: 'CFCA-C',
             value: 130,
             revenue: 0,
@@ -36,12 +36,31 @@ module Engine
             color: nil,
           },
           {
-            name: 'Concession 3b – RCL',
+            name: 'Concession 2b – RCL',
             sym: 'RCL-C',
             value: 130,
             revenue: 0,
             desc: "Once purchased, immediately float and gain the director share for Réseaux non concédés "\
                   "de l'Indochine. Par price equals half the bid price, rounded down to the nearest par price.",
+            color: nil,
+          },
+          {
+            name: 'Concession 3a – STC',
+            sym: 'STC-C',
+            value: 130,
+            revenue: 0,
+            desc: 'Once purchased, immediately float and gain the director share for Société générale des '\
+                  'tramways à vapeur de Cochinchine. Par price equals half the bid price, rounded down to '\
+                  'the nearest par price.',
+            color: nil,
+          },
+          {
+            name: 'Concession 3b – TMR',
+            sym: 'TMR-C',
+            value: 130,
+            revenue: 0,
+            desc: 'Once purchased, immediately float and gain the director share for Chemin de fer de '\
+                  'Trans-Mékong. Par price equals half the bid price, rounded down to the nearest par price.',
             color: nil,
           },
 
@@ -90,12 +109,11 @@ module Engine
             value: 150,
             revenue: 10,
             desc: 'Reserves a share in a Central Concession corporation. While held by a player, '\
-                  'this private blocks K18 (Hai Van Pass) from being upgraded. '\
-                  'The holder may forfeit the ₫10 income to claim the reserved share '\
-                  '(private becomes inactive with ₫0 revenue). '\
-                  'When purchased by a corporation, the reserved share transfers to that corporation; '\
-                  'the corporation may then close this private for a free tile and token placement on K18. '\
-                  'K18 can only be upgraded to HV tiles.',
+                  'blocks K18 (Hai Van Pass) from being upgraded. '\
+                  'A player may redeem it for the reserved share (private income drops to ₫0). '\
+                  'If sold to a corporation unredeemed, the reserved share returns to that corp\'s IPO; '\
+                  'the corporation may then close this private for a free tile upgrade on K18 '\
+                  '(token placement is not free). K18 can only be upgraded to HV tiles.',
             color: nil,
           },
           {
@@ -123,15 +141,19 @@ module Engine
             sym: 'N2',
             value: 60,
             revenue: 0,
-            desc: 'Gain one share in the North Concession (CFI or TTC).',
+            desc: 'When purchased, receive one share of the North Concession corporation (CFI or HPR). '\
+                  'The bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
             name: 'Export Commission of Hai Phong',
             sym: 'N3',
-            value: 80,
+            value: 150,
             revenue: 5,
-            desc: 'Can be discarded to place the port bonus token. The port token adds +30 to a port city.',
+            desc: 'Reserves a share in the North Concession (CFI). A player may redeem it for the '\
+                  'reserved CFI share (private income drops to ₫0). If sold to a corporation unredeemed, '\
+                  'the reserved share returns to the CFI IPO. '\
+                  'Can be discarded to place the port bonus token (+30 to a port city).',
             color: nil,
           },
           {
@@ -139,8 +161,11 @@ module Engine
             sym: 'N4',
             value: 150,
             revenue: 10,
-            desc: 'Owner may use this to make a free placement or upgrade of one city or town on a plain '\
-                  'tile with a +30 city bonus token. Reserves a share in the North Concession.',
+            desc: 'Reserves a share in the North Concession (CFI). The owning corporation may redeem '\
+                  'it for the reserved CFI share (private income drops to ₫0). '\
+                  'If closed unredeemed, the reserved share returns to the CFI IPO. '\
+                  'The owner may also make a free placement or upgrade of one city or town tile '\
+                  'with a +30 city bonus token.',
             color: nil,
           },
 
@@ -150,7 +175,8 @@ module Engine
             sym: 'S1',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the South Concession (STC or TMR).',
+            desc: 'When purchased, receive one share of the South Concession corporation (STC or TMR). '\
+                  'The bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
@@ -158,7 +184,8 @@ module Engine
             sym: 'S2',
             value: 60,
             revenue: 0,
-            desc: 'Gain a share in the South Concession (STC or TMR).',
+            desc: 'When purchased, receive one share of the South Concession corporation (STC or TMR). '\
+                  'The bid price is paid to that corporation instead of the bank.',
             color: nil,
           },
           {
@@ -175,18 +202,10 @@ module Engine
             sym: 'S4',
             value: 150,
             revenue: 10,
-            desc: 'The owner may use this private to place a token into C30 (Phnom Penh). Reserves a '\
-                  'share in the South Concession.',
-            color: nil,
-          },
-          # S5 exists to balance the 3p distribution: North+South+Central each need S privates,
-          # totalling 4S, but only S1/S3/S4 are available (3 items) without this entry.
-          {
-            name: 'Mekong Delta Trading Contract B',
-            sym: 'S5',
-            value: 60,
-            revenue: 0,
-            desc: 'Gain a share in the South Concession (STC or TMR).',
+            desc: 'Reserves a share in the South Concession (STC). A player may redeem it for the '\
+                  'reserved STC share (private income drops to ₫0). If sold to a corporation unredeemed, '\
+                  'the reserved share returns to the STC IPO. '\
+                  'The owner may also use this private to place a free token into C30 (Phnom Penh).',
             color: nil,
           },
         ].freeze
@@ -199,6 +218,7 @@ module Engine
             logo: '1881/CFI',
             simple_logo: '1881/CFI.alt',
             float_percent: 50,
+            float_includes_reserved: true,
             tokens: [0, 50, 80, 100, 100],
             coordinates: 'E6',
             color: '#d4af00',
@@ -210,6 +230,7 @@ module Engine
             logo: '1881/STC',
             simple_logo: '1881/STC.alt',
             float_percent: 50,
+            float_includes_reserved: true,
             tokens: [0, 50, 80, 100, 100],
             coordinates: 'G32',
             color: '#e06666',
@@ -221,6 +242,7 @@ module Engine
             logo: '1881/RCL',
             simple_logo: '1881/RCL.alt',
             float_percent: 50,
+            float_includes_reserved: true,
             tokens: [0, 50, 80, 100],
             coordinates: 'J17',
             color: '#b4a7d6',
@@ -232,6 +254,7 @@ module Engine
             logo: '1881/CFCA',
             simple_logo: '1881/CFCA.alt',
             float_percent: 50,
+            float_includes_reserved: true,
             tokens: [0, 50, 80, 100],
             coordinates: 'K20',
             color: '#f9cb9c',
