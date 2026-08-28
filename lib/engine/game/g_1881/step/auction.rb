@@ -245,8 +245,7 @@ module Engine
               @sub_phase = :privates
               @auctioning = nil
               @log << "--- Private auction begins ---"
-              goto_entity!(entities.first)
-              auto_offer_if_sole!
+              auto_offer_if_sole!(goto_next_offerer!(entities.first))
             else
               # Next concession starts with the player seated after the winner
               next_starter = entities[(entities.index(winner) + 1) % entities.size]
@@ -406,12 +405,25 @@ module Engine
 
           def end_private_auction!
             next_player = @player1
-            goto_entity!(@player1)
-
-            [@player1, @player2, @receiver, @auctioneer].compact.each(&:unpass!)
+            bidders = [@player1, @player2, @receiver, @auctioneer].compact
             @auctioneer = @auctioning = @player1 = @player2 = @receiver = nil
+            bidders.each(&:unpass!)
 
-            auto_offer_if_sole!(next_player)
+            auto_offer_if_sole!(goto_next_offerer!(next_player))
+          end
+
+          # Skip any player(s) who have no private companies left to offer.
+          def goto_next_offerer!(start_entity)
+            return start_entity if finished?
+
+            entity = start_entity
+            until entity.unsold_companies.any?
+              @log << "#{entity.name} has no private companies left to offer — skipped"
+              entity = entities[(entities.index(entity) + 1) % entities.size]
+            end
+
+            goto_entity!(entity)
+            entity
           end
 
           def next_private_bidder!
