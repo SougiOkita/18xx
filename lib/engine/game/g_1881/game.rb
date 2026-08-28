@@ -5,12 +5,14 @@ require_relative 'map'
 require_relative 'meta'
 require_relative 'round/auction'
 require_relative 'step/auction'
-require_relative 'step/buy_sell_par_shares'
 require_relative 'step/buy_train'
 require_relative 'step/dividend'
 require_relative 'step/redeem_shares'
 require_relative 'step/issue_shares'
+require_relative 'step/loan'
+require_relative 'step/pay_interest'
 require_relative 'step/merge'
+require_relative '../../loan'
 require_relative '../base'
 
 module Engine
@@ -36,6 +38,21 @@ module Engine
         CAPITALIZATION = :incremental
 
         MUST_SELL_IN_BLOCKS = false
+
+        # =====================================================================
+        # DOUMER FUND
+        # A 10-share corporation representing the French state railway fund. It
+        # pars and floats automatically at game start (see setup_doumer_fund) and
+        # never operates -- it exists only so players can invest in it, and so it
+        # can lend money to operating corporations. See the "DOUMER FUND" section
+        # below for the loan/interest mechanics.
+        # =====================================================================
+        DOUMER_ID = 'DOUMER'
+        DOUMER_PAR_PRICE = 100
+        DOUMER_STARTING_CASH = 2000
+        LOAN_VALUE = 100
+        LOAN_INTEREST = 10
+        NUM_DOUMER_LOANS = DOUMER_STARTING_CASH / LOAN_VALUE
 
         # STOCK MARKET
         # Par zones: p=yellow (always); x=green par (155, unlocked by green_par event); z=brown par (247, unlocked by brown_par event)
@@ -421,6 +438,9 @@ module Engine
           @current_tranche_idx = 0
           @tranche_exhausted = false
           @stock_round_count = 0
+
+          @doumer_interest_pool = 0
+          setup_doumer_fund
         end
 
         # Called from step/auction.rb after distribute_privates! to record
@@ -569,12 +589,11 @@ module Engine
             Engine::Step::DiscardTrain,
             Engine::Step::Exchange,
             Engine::Step::SpecialTrack,
-            G1881::Step::BuySellParShares,
+            Engine::Step::BuySellParShares,
           ])
         end
 
         def new_stock_round
-          close_bank_shorts
           if @stock_round_count.positive?
             @current_tranche_idx = [@current_tranche_idx + 1, @tranches.size].min
             @tranche_exhausted = false
@@ -587,156 +606,6 @@ module Engine
           end
           @stock_round_count += 1
           super
-        end
-
-        # =====================================================================
-        # SHORT SELLING
-        # =====================================================================
-
-        # All short positions across all holders for this corporation.
-        def shorts(corporation)
-          @_shares.values.select { |s| s.corporation == corporation && s.percent.negative? }
-        end
-
-        # Short positions held by a specific entity for this corporation.
-        def entity_shorts(entity, corporation)
-          entity.shares_of(corporation).select { |s| s.percent.negative? }
-        end
-
-        # Register a new synthetic share (short or its matching positive) in all indexes.
-        def add_new_share(share)
-          owner = share.owner
-          corporation = share.corporation
-          corporation.share_holders[owner] += share.percent if owner
-          owner.shares_by_corporation[corporation] << share
-          @_shares[share.id] = share
-        end
-
-        # Remove a synthetic share from all indexes.
-        def remove_share(share)
-          owner = share.owner
-          corporation = share.corporation
-          corporation.share_holders[owner] -= share.percent if owner
-          owner.shares_by_corporation[corporation].delete(share)
-          @_shares.delete(share.id)
-        end
-
-        # Create a short: player receives cash, one negative-percent share goes to the player
-        # and one matching positive share is placed in the share pool.
-        def short(entity, corporation)
-          price   = corporation.share_price.price
-          percent = corporation.share_percent
-
-          highest = [@_shares.values
-                              .select { |s| s.corporation == corporation }
-                              .map(&:index).max || 0, 9].max
-
-          pool_share  = Share.new(corporation, owner: @share_pool, percent:  percent, index: highest + 1)
-          short_share = Share.new(corporation, owner: entity,      percent: -percent, index: highest + 2)
-          short_share.buyable = false
-          short_share.counts_for_limit = false
-
-          @log << "#{entity.name} shorts a #{percent}% share of #{corporation.name} " \
-                  "for #{format_currency(price)}"
-          @bank.spend(price, entity)
-          add_new_share(short_share)
-          add_new_share(pool_share)
-        end
-
-        # Cover a short: remove both the positive share (just bought by entity) and its
-        # matching negative-percent counterpart.
-        def unshort(entity, share)
-          shares = entity.shares_of(share.corporation)
-          remove_share(share)
-          short = shares.find { |s| s.percent == -share.percent }
-          remove_share(short)
-        end
-
-        # If the market holds both a positive share and a short for the same corporation,
-        # cancel them out (this happens after any sell that deposits shares in the pool).
-        def close_market_shorts
-          @corporations.each do |corporation|
-            next if corporation.closed?
-
-            count = 0
-            while entity_shorts(@share_pool, corporation).any? &&
-                  (pool_longs = @share_pool.shares_of(corporation)
-                                            .select { |s| s.percent.positive? && !s.president }).any?
-              unshort(@share_pool, pool_longs.first)
-              count += 1
-            end
-            @log << "Market closes #{count} short(s) for #{corporation.name}" if count.positive?
-          end
-        end
-
-        # At the start of each SR, the bank buys treasury shares to close any remaining
-        # market (share-pool) shorts.
-        def close_bank_shorts
-          @corporations.each do |corporation|
-            next if corporation.closed?
-            next unless corporation.share_price
-            next if corporation.share_price.acquisition? || corporation.share_price.liquidation?
-
-            count = 0
-            while entity_shorts(@share_pool, corporation).any? && corporation.shares.any?
-              share = corporation.shares.first
-              @share_pool.buy_shares(@share_pool, share)
-              unshort(@share_pool, share)
-              count += 1
-            end
-            @log << "Market closes #{count} short(s) for #{corporation.name}" if count.positive?
-          end
-        end
-
-        # Force-close all short positions on a corp being absorbed in a merger.
-        # Each shorter pays the buyout price. If they can't afford it, their positive
-        # shares in other corps are sold first. If still insolvent, they go bankrupt.
-        def close_merger_shorts(corporation, price_per_share)
-          shorts(corporation).each do |short_share|
-            holder = short_share.owner
-            next unless holder.respond_to?(:cash)
-
-            unless holder.cash >= price_per_share
-              @log << "#{holder.name} must sell shares to cover short in #{corporation.name}"
-              # Sell non-president shares first, then president shares, skipping absorbed corp
-              holder.shares_by_corporation
-                    .sort_by { |_, shares| shares.any?(&:president) ? 1 : 0 }
-                    .each do |corp, shares|
-                break if holder.cash >= price_per_share
-                next if corp == corporation
-
-                shares.select { |s| s.percent.positive? }
-                      .sort_by { |s| s.president ? 1 : 0 }
-                      .each do |share|
-                  break if holder.cash >= price_per_share
-
-                  bundle = Engine::ShareBundle.new([share])
-                  sell_shares_and_change_price(bundle)
-                  @log << "#{holder.name} is forced to sell 1 share of #{corp.name}"
-                end
-              end
-            end
-
-            pool_share = @share_pool.shares_of(corporation).find { |s| s.percent == corporation.share_percent }
-            remove_share(pool_share) if pool_share
-            remove_share(short_share)
-
-            if holder.cash >= price_per_share
-              holder.spend(price_per_share, @bank)
-              @log << "#{holder.name}'s short in #{corporation.name} is force-closed " \
-                      "at #{format_currency(price_per_share)}"
-            else
-              holder.spend(holder.cash, @bank)
-              @log << "#{holder.name} cannot cover short in #{corporation.name} — bankrupt"
-              declare_bankrupt(holder)
-            end
-          end
-        end
-
-        # After any sell, try to close market shorts immediately.
-        def sell_shares_and_change_price(bundle, allow_president_change: true, swap: nil, movement: nil)
-          super
-          close_market_shorts
         end
 
         # =====================================================================
@@ -989,12 +858,181 @@ module Engine
         end
 
         # =====================================================================
+        # DOUMER FUND
+        # =====================================================================
+        def doumer
+          @doumer ||= corporation_by_id(self.class::DOUMER_ID)
+        end
+
+        # Pars and floats the Doumer fund immediately at game start, seeded with
+        # a fixed treasury rather than the usual per-share float proceeds.
+        def setup_doumer_fund
+          d = doumer
+          return unless d
+
+          par_price = stock_market.par_prices.find { |p| p.price == self.class::DOUMER_PAR_PRICE }
+          stock_market.set_par(d, par_price)
+          d.ipoed = true
+          d.floated = true
+          @bank.spend(self.class::DOUMER_STARTING_CASH, d)
+          @log << "#{d.name} pars at #{format_currency(self.class::DOUMER_PAR_PRICE)} and floats " \
+                  "automatically with #{format_currency(self.class::DOUMER_STARTING_CASH)} in capital"
+        end
+
+        # The Doumer fund never operates -- it only lends money and collects interest.
+        def operating_order
+          super.reject { |c| c == doumer }
+        end
+
+        # The Doumer fund's treasury is represented as 20 ₫100 loan cards.
+        def init_loans
+          Array.new(self.class::NUM_DOUMER_LOANS) { |id| Loan.new(id, self.class::LOAN_VALUE) }
+        end
+
+        def maximum_loans(_entity)
+          self.class::NUM_DOUMER_LOANS
+        end
+
+        def loan_value(_entity = nil)
+          self.class::LOAN_VALUE
+        end
+
+        def interest_rate
+          self.class::LOAN_INTEREST
+        end
+
+        def interest_owed(entity)
+          entity.loans.size * self.class::LOAN_INTEREST
+        end
+
+        def can_pay_interest?(entity, extra_cash = 0)
+          owed = interest_owed(entity)
+          return true unless owed.positive?
+
+          president_cash = entity.player&.cash || 0
+          entity.cash + extra_cash + president_cash >= owed
+        end
+
+        # Interest is always settled (or forgiven) automatically by PayInterest
+        # before BuyTrain runs, so trains are never gated on it.
+        def interest_paid?(_entity)
+          true
+        end
+
+        def cannot_pay_interest_str
+          '(may not be able to pay Doumer fund interest)'
+        end
+
+        # Hide the Loans/Interest rows on the Doumer fund's own corporation card;
+        # it is a lender, not a borrower.
+        def corporation_show_loans?(corporation)
+          corporation != doumer
+        end
+
+        def take_doumer_loan(entity)
+          loan = @loans.shift
+          raise GameError, 'No loans available from the Doumer fund' unless loan
+
+          entity.loans << loan
+          doumer.spend(self.class::LOAN_VALUE, entity)
+          @log << "#{entity.name} takes a #{format_currency(self.class::LOAN_VALUE)} loan from #{doumer.name}"
+        end
+
+        def payoff_doumer_loan(entity)
+          loan = entity.loans.pop
+          raise GameError, "#{entity.name} has no loans to pay off" unless loan
+
+          entity.spend(self.class::LOAN_VALUE, doumer)
+          @loans << loan
+          @log << "#{entity.name} pays off a #{format_currency(self.class::LOAN_VALUE)} loan to #{doumer.name}"
+        end
+
+        # Interest owed = ₫10 per outstanding loan. Paid from the corporation's
+        # cash first (this covers revenue withheld this turn as much as older
+        # treasury cash), then the president's personal cash. Any shortfall
+        # beyond that is forgiven for now. Whatever is collected is set aside
+        # and distributed to Doumer shareholders at the end of the OR — see
+        # distribute_doumer_interest!.
+        def collect_doumer_interest!(entity)
+          return unless entity.corporation?
+
+          owed = interest_owed(entity)
+          return unless owed.positive?
+
+          collected = 0
+
+          from_entity = [owed, entity.cash].min
+          if from_entity.positive?
+            entity.spend(from_entity, @bank)
+            collected += from_entity
+            owed -= from_entity
+          end
+
+          president = entity.player
+          if owed.positive? && president
+            from_president = [owed, president.cash].min
+            if from_president.positive?
+              president.spend(from_president, @bank)
+              collected += from_president
+              owed -= from_president
+            end
+          end
+
+          return unless collected.positive?
+
+          @doumer_interest_pool += collected
+          @log << "#{entity.name} pays #{format_currency(collected)} interest on #{entity.loans.size} " \
+                  "loan(s), set aside for #{doumer.name} shareholders"
+        end
+
+        # Distributes the accumulated interest pool to Doumer fund shareholders
+        # (proportional to shares held), with any rounding remainder going to
+        # the fund's own treasury.
+        def distribute_doumer_interest!
+          pool = @doumer_interest_pool
+          return unless pool.positive?
+
+          @doumer_interest_pool = 0
+          d = doumer
+          return unless d
+
+          per_share = pool / d.total_shares.to_f
+          total_paid = 0
+
+          (@players + @corporations).each do |holder|
+            next if holder == d
+
+            shares = holder.num_shares_of(d)
+            next unless shares.positive?
+
+            amount = (shares * per_share).ceil
+            next unless amount.positive?
+
+            @bank.spend(amount, holder, check_positive: false)
+            total_paid += amount
+            @log << "#{holder.name} receives #{format_currency(amount)} interest from #{d.name}"
+          end
+
+          remainder = [pool - total_paid, 0].max
+          return unless remainder.positive?
+
+          @bank.spend(remainder, d)
+          @log << "#{d.name} retains #{format_currency(remainder)} interest"
+        end
+
+        def or_round_finished
+          super
+          distribute_doumer_interest!
+        end
+
+        # =====================================================================
         # OPERATING ROUND
         # =====================================================================
         def operating_round(round_num)
           Engine::Round::Operating.new(self, [
             Engine::Step::Bankrupt,
             G1881::Step::RedeemShares,    # 1. Redeem share (beginning of OR)
+            G1881::Step::Loan,            # 1b. Take/repay a Doumer fund loan
             Engine::Step::SpecialTrack,
             Engine::Step::SpecialToken,
             Engine::Step::HomeToken,
@@ -1002,6 +1040,7 @@ module Engine
             Engine::Step::Token,          # 3. Place station token
             Engine::Step::Route,          # 4. Run trains (TODO: custom route logic)
             G1881::Step::Dividend,        # 5. Pay dividend
+            G1881::Step::PayInterest,     # 5b. Deduct Doumer fund loan interest
             Engine::Step::DiscardTrain,
             G1881::Step::BuyTrain,        # 6. Buy trains (separate limits for +1 vs normal)
             G1881::Step::IssueShares,     # 7. Issue shares (end of OR)

@@ -354,6 +354,20 @@ module Engine
             color: '#c8bfe7',
             text_color: 'black',
           },
+
+          # === Doumer Fund ===
+          # Represents the French state fund (after Governor-General Paul Doumer) that
+          # bankrolled the Indochina railway program. Pars and floats automatically at
+          # game start; never operates. See DOUMER_* constants in game.rb.
+          {
+            sym: 'DOUMER',
+            name: "Fonds des chemins de fer de l'Indochine",
+            logo: '1881/DOUMER',
+            simple_logo: '1881/DOUMER.alt',
+            tokens: [0, 0, 100, 100, 100],
+            color: '#14213d',
+            text_color: 'white',
+          },
         ].freeze
       end
     end
