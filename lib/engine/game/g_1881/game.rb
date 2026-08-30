@@ -90,7 +90,7 @@ module Engine
         EVENTS_TEXT = Base::EVENTS_TEXT.merge(
           green_par: ['Green par available', 'Corporations may now par at green price (₫155)'],
           brown_par: ['Brown par available', 'Corporations may now par at brown price (₫247)'],
-          eight_plus_purchased: ['First 8+ train sold', 'End game triggered — complete this OR set then play one more'],
+          diesel_purchased: ['First D train sold', 'End game triggered — complete this OR set then play one more'],
         ).freeze
 
         # =====================================================================
@@ -153,6 +153,13 @@ module Engine
             operating_rounds: 3,
           },
           {
+            name: 'D',
+            on: 'D',
+            train_limit: 2,
+            tiles: %i[yellow green brown],
+            operating_rounds: 3,
+          },
+          {
             name: 'R2+1',
             on: 'R2+1',
             train_limit: 2,
@@ -168,7 +175,7 @@ module Engine
         # =====================================================================
         TRAINS = [
           # Standard trains — 2-trains are the first purchasable trains
-          { name: '2', distance: 2, price: 80, rusts_on: '4', num: 6 },
+          { name: '2', distance: 2, price: 80, rusts_on: '4', num: 12 },
 
           # 120 base; 40 discount when trading a 2-train (saves 80)
           {
@@ -177,7 +184,7 @@ module Engine
             price: 120,
             discount: { '2' => 80 },
             rusts_on: '5',
-            num: 5,
+            num: 6,
             events: [{ 'type' => 'green_par' }],
           },
 
@@ -230,10 +237,20 @@ module Engine
               { 'nodes' => %w[city offboard], 'pay' => 8,  'visit' => 8  },
               { 'nodes' => %w[town],          'pay' => 99, 'visit' => 99 },
             ],
+            price: 900,
+            discount: { '5' => 250, '5+1' => 250, '6' => 250 },
+            num: 2,
+          },
+          {
+            name: 'D',
+            distance: [
+              { 'nodes' => %w[city offboard], 'pay' => 99,  'visit' => 99  },
+              { 'nodes' => %w[town],          'pay' => 99, 'visit' => 99 },
+            ],
             price: 1100,
-            discount: { '5' => 300, '5+1' => 300, '6' => 300 },
+            discount: {  '6' => 300, '8+' => 600 },
             num: 12,
-            events: [{ 'type' => 'eight_plus_purchased' }],
+            events: [{ 'type' => 'diesel_purchased' }],
           },
 
           # R2+1: Rapid 2+1 regional train (like a 3E/diesel variant)
@@ -397,12 +414,12 @@ module Engine
         # GAME END
         # =====================================================================
         def game_end_check_stock_market?
-          @stock_market.max_reached? || @eight_plus_purchased
+          @stock_market.max_reached? || @diesel_purchased
         end
 
-        def event_eight_plus_purchased!
+        def event_diesel_purchased!
           @log << '-- Event: First 8+ train purchased — end game triggered --'
-          @eight_plus_purchased = true
+          @diesel_purchased = true
         end
 
         def init_starting_cash(players, bank)
@@ -423,7 +440,7 @@ module Engine
         # =====================================================================
         def setup
           @available_par_groups = %i[par]
-          @eight_plus_purchased = false
+          @diesel_purchased = false
           @central_share_assignments = {}
           @c3_reserved_corp_sym = nil
           @reserved_redeemed = {}
