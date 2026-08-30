@@ -380,21 +380,46 @@ module Engine
             end_private_auction!
           end
 
+          # Nobody bid on this private. It is forced onto the player seated
+          # closest to the auctioneer (going around the table) who can afford
+          # it, with the auctioneer themself as the last resort. If literally
+          # no one can afford it at the current price, every already-owned
+          # private pays out its income and the price is knocked down by this
+          # company's own revenue -- repeating until someone can afford it.
           def force_private!(company)
-            auctioneer = @auctioneer
-            while auctioneer.cash < company.value
-              @log << "#{auctioneer.name} cannot afford #{company.name}, paying out revenues"
+            price = company.value
+
+            loop do
+              buyer = nearest_affordable_player(price)
+              if buyer
+                assign_private!(buyer, company, @auctioneer, price)
+                discounted = price < company.value ? " (discounted from #{@game.format_currency(company.value)})" : ''
+                @log << "#{buyer.name} is forced to buy #{company.name} for " \
+                        "#{@game.format_currency(price)}#{discounted}"
+                end_private_auction!
+                return
+              end
+
+              @log << "No one can afford #{company.name} for #{@game.format_currency(price)} — " \
+                      'existing privates pay out their income and the price is reduced'
               @game.payout_companies
+              price = company.revenue.positive? ? [price - company.revenue, 0].max : 0
             end
-            assign_private!(auctioneer, company, auctioneer, company.value)
-            @log << "#{auctioneer.name} is forced to buy #{company.name} for #{@game.format_currency(company.value)}"
-            end_private_auction!
+          end
+
+          # Players ordered by seating proximity to the auctioneer (nearest
+          # neighbor first), auctioneer last, restricted to those who can
+          # currently afford `price`.
+          def nearest_affordable_player(price)
+            order = entities.rotate(entities.index(@auctioneer) + 1)
+            order.find { |player| player.cash >= price }
           end
 
           def assign_private!(player, company, auctioneer, price)
+            actual_price = price || company.value
             company.owner = player
             player.companies << company
-            player.spend(price || company.value, @game.bank)
+            player.spend(actual_price, @game.bank) if actual_price.positive?
 
             auctioneer.unsold_companies.delete(company)
             @companies.delete(company)
