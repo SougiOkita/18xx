@@ -457,6 +457,7 @@ module Engine
           @stock_round_count = 0
 
           @doumer_interest_pool = 0
+          @doumer_loan_taken_this_or = false
           setup_doumer_fund
         end
 
@@ -952,6 +953,7 @@ module Engine
 
           entity.loans << loan
           doumer.spend(self.class::LOAN_VALUE, entity)
+          @doumer_loan_taken_this_or = true
           @log << "#{entity.name} takes a #{format_currency(self.class::LOAN_VALUE)} loan from #{doumer.name}"
         end
 
@@ -1037,15 +1039,29 @@ module Engine
           @log << "#{d.name} retains #{format_currency(remainder)} interest"
         end
 
+        # Moves the Doumer fund's own share price: right if any corporation took
+        # a loan this OR, left if none did.
+        def move_doumer_price!
+          d = doumer
+          return unless d&.share_price
+
+          old_price = d.share_price
+          @doumer_loan_taken_this_or ? stock_market.move_right(d) : stock_market.move_left(d)
+          log_share_price(d, old_price)
+        end
+
         def or_round_finished
           super
           distribute_doumer_interest!
+          move_doumer_price!
         end
 
         # =====================================================================
         # OPERATING ROUND
         # =====================================================================
         def operating_round(round_num)
+          @doumer_loan_taken_this_or = false
+
           Engine::Round::Operating.new(self, [
             Engine::Step::Bankrupt,
             G1881::Step::RedeemShares,    # 1. Redeem share (beginning of OR)
