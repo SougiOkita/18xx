@@ -364,6 +364,7 @@ module Engine
             name: "Fonds des chemins de fer de l'Indochine",
             logo: '1881/DOUMER',
             simple_logo: '1881/DOUMER.alt',
+            shares: Array.new(10, 10),
             tokens: [0, 0, 100, 100, 100],
             color: '#14213d',
             text_color: 'white',

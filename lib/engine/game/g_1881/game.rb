@@ -11,6 +11,7 @@ require_relative 'step/redeem_shares'
 require_relative 'step/issue_shares'
 require_relative 'step/loan'
 require_relative 'step/pay_interest'
+require_relative 'step/nationalization'
 require_relative 'step/merge'
 require_relative '../../loan'
 require_relative '../base'
@@ -407,7 +408,7 @@ module Engine
         # MERGE (phases '2' and '3' only)
         # =====================================================================
         def mergeable?(corp)
-          corp.floated? && !corp.closed?
+          corp != doumer && corp.floated? && !corp.closed?
         end
 
         # =====================================================================
@@ -458,6 +459,8 @@ module Engine
 
           @doumer_interest_pool = 0
           @doumer_loan_taken_this_or = false
+          @pending_nationalization = nil
+          @nationalized_corps = []
           setup_doumer_fund
         end
 
@@ -581,6 +584,7 @@ module Engine
         end
 
         def can_par?(corporation, parrer)
+          return false if @nationalized_corps.include?(corporation)
           return super unless self.class::TRANCHE_ELIGIBLE_CORPS.include?(corporation.id)
           return false unless super
           return false unless in_current_tranche?(corporation)
@@ -968,10 +972,12 @@ module Engine
 
         # Interest owed = ₫10 per outstanding loan. Paid from the corporation's
         # cash first (this covers revenue withheld this turn as much as older
-        # treasury cash), then the president's personal cash. Any shortfall
-        # beyond that is forgiven for now. Whatever is collected is set aside
-        # and distributed to Doumer shareholders at the end of the OR — see
-        # distribute_doumer_interest!.
+        # treasury cash), then the president's personal cash, then -- exactly
+        # like an emergency train purchase -- the president is forced to sell
+        # every sellable share they hold. Whatever is collected this way is
+        # still set aside for Doumer shareholders even if it isn't enough; any
+        # remaining shortfall triggers nationalize_corporation! instead of
+        # being forgiven. See distribute_doumer_interest! for the payout.
         def collect_doumer_interest!(entity)
           return unless entity.corporation?
 
@@ -979,29 +985,53 @@ module Engine
           return unless owed.positive?
 
           collected = 0
+          president = entity.player
 
-          from_entity = [owed, entity.cash].min
-          if from_entity.positive?
-            entity.spend(from_entity, @bank)
-            collected += from_entity
-            owed -= from_entity
+          collected += spend_toward_doumer_interest!(entity, owed - collected)
+          collected += spend_toward_doumer_interest!(president, owed - collected) if president
+
+          if president && (owed - collected).positive?
+            force_sell_all_shares!(president)
+            collected += spend_toward_doumer_interest!(president, owed - collected)
           end
 
-          president = entity.player
-          if owed.positive? && president
-            from_president = [owed, president.cash].min
-            if from_president.positive?
-              president.spend(from_president, @bank)
-              collected += from_president
-              owed -= from_president
+          if collected.positive?
+            @doumer_interest_pool += collected
+            @log << "#{entity.name} pays #{format_currency(collected)} interest on #{entity.loans.size} " \
+                    "loan(s), set aside for #{doumer.name} shareholders"
+          end
+
+          return unless (owed - collected).positive?
+
+          @log << "#{entity.name} cannot pay #{format_currency(owed - collected)} interest even after " \
+                  "#{president&.name || 'its'} forced share sale -- #{entity.name} is nationalized"
+          @pending_nationalization = entity
+        end
+
+        # Pays up to `remaining` toward the interest bill out of payer's cash.
+        def spend_toward_doumer_interest!(payer, remaining)
+          return 0 unless payer && remaining.positive?
+
+          amount = [remaining, payer.cash].min
+          return 0 unless amount.positive?
+
+          payer.spend(amount, @bank)
+          amount
+        end
+
+        # Mirrors the emergency-train-purchase liquidation (Step::Bankrupt#sell_bankrupt_shares):
+        # sell every sellable bundle the player holds, across all corporations,
+        # largest bundle first, bypassing the normal once-per-turn sell limits.
+        def force_sell_all_shares!(player)
+          @log << "#{player.name} is forced to sell shares to cover #{doumer.name} interest"
+
+          player.shares_by_corporation(sorted: true).each do |corporation, _|
+            next unless corporation.share_price
+
+            while (bundle = bundles_for_corporation(player, corporation).max_by(&:price))
+              sell_shares_and_change_price(bundle)
             end
           end
-
-          return unless collected.positive?
-
-          @doumer_interest_pool += collected
-          @log << "#{entity.name} pays #{format_currency(collected)} interest on #{entity.loans.size} " \
-                  "loan(s), set aside for #{doumer.name} shareholders"
         end
 
         # Distributes the accumulated interest pool to Doumer fund shareholders
@@ -1056,6 +1086,66 @@ module Engine
           move_doumer_price!
         end
 
+        # The corporation currently awaiting its ex-president's token choice
+        # (see G1881::Step::Nationalization), or nil.
+        def pending_nationalization
+          @pending_nationalization
+        end
+
+        # Nationalizes a corporation that could not pay its Doumer fund
+        # interest even after its president was forced to sell every
+        # sellable share. hex_id (chosen by the ex-president, may be nil/blank
+        # if the corporation had no placed tokens) names the one token that
+        # becomes a Doumer token; every other token comes off the board.
+        # Remaining cash, trains, and companies transfer to the Doumer fund;
+        # the corporation closes permanently and can never be parred again.
+        def nationalize_corporation!(entity, hex_id)
+          @pending_nationalization = nil
+          d = doumer
+
+          if hex_id && !hex_id.empty?
+            hex = hex_by_id(hex_id)
+            token = hex&.tile&.cities&.flat_map(&:tokens)&.compact&.find { |t| t.corporation == entity }
+            doumer_token = token && d.next_token
+            if doumer_token
+              token.swap!(doumer_token, check_tokenable: false)
+              @log << "#{d.name} places a token on #{hex.name} (#{hex.location_name}), replacing #{entity.name}'s"
+            elsif token
+              token.remove!
+              @log << "#{d.name} has no tokens left -- #{entity.name}'s token on #{hex.name} is simply removed"
+            end
+          end
+
+          hexes.each do |hex|
+            hex.tile.cities.each do |city|
+              city.tokens.select { |t| t&.corporation == entity }.each(&:remove!)
+              city.reservations.delete(entity) if city.reserved_by?(entity)
+            end
+            hex.tile.reservations.delete(entity) if hex.tile.reserved_by?(entity)
+          end
+
+          entity.spend(entity.cash, d) if entity.cash.positive?
+
+          unless entity.trains.empty?
+            entity.trains.each { |t| t.owner = d }
+            d.trains.concat(entity.trains)
+            entity.trains.clear
+          end
+
+          unless entity.companies.empty?
+            entity.companies.each { |c| c.owner = d }
+            d.companies.concat(entity.companies)
+            entity.companies.clear
+          end
+
+          entity.close!
+          entity.floatable = false
+          @nationalized_corps << entity
+
+          @log << "#{entity.name} is closed permanently -- its remaining cash, trains, and companies " \
+                  "transfer to #{d.name}"
+        end
+
         # =====================================================================
         # OPERATING ROUND
         # =====================================================================
@@ -1074,6 +1164,7 @@ module Engine
             Engine::Step::Route,          # 4. Run trains (TODO: custom route logic)
             G1881::Step::Dividend,        # 5. Pay dividend
             G1881::Step::PayInterest,     # 5b. Deduct Doumer fund loan interest
+            G1881::Step::Nationalization, # 5c. Choose Doumer token if nationalized this turn
             Engine::Step::DiscardTrain,
             G1881::Step::BuyTrain,        # 6. Buy trains (separate limits for +1 vs normal)
             G1881::Step::IssueShares,     # 7. Issue shares (end of OR)
