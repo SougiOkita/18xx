@@ -42,7 +42,7 @@ module Engine
         EBUY_CAN_TAKE_PLAYER_LOAN = true
         MARKET_SHARE_LIMIT = 80 # percent
 
-        BANK_CASH = 37_860
+        BANK_CASH = :unlimited
 
         CERT_LIMIT = { 3 => 20, 4 => 16, 5 => 14, 6 => 12, 7 => 11 }.freeze
 
@@ -257,17 +257,17 @@ module Engine
         ).freeze
 
         def event_float_30!
-          @log << "-- Event: #{EVENTS_TEXT['float_30'][1]} --"
+          @log << "-- Event: #{self.class::EVENTS_TEXT['float_30'][1]} --"
           update_float_percent(30)
         end
 
         def event_float_40!
-          @log << "-- Event: #{EVENTS_TEXT['float_40'][1]} --"
+          @log << "-- Event: #{self.class::EVENTS_TEXT['float_40'][1]} --"
           update_float_percent(40)
         end
 
         def event_float_60!
-          @log << "-- Event: #{EVENTS_TEXT['float_60'][1]} --"
+          @log << "-- Event: #{self.class::EVENTS_TEXT['float_60'][1]} --"
           update_float_percent(60)
         end
 
