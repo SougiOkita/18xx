@@ -192,7 +192,7 @@ module Engine
             name: 'Société de produits de la mer',
             sym: 'S3',
             value: 130,
-            revenue: 0,
+            revenue: 10,
             desc: 'Gain the director\'s share of FMT. Par price equals half the bid price, rounded down '\
                   'to the nearest par price.',
             color: nil,
@@ -365,6 +365,26 @@ module Engine
             logo: '1881/DOUMER',
             simple_logo: '1881/DOUMER.alt',
             shares: Array.new(10, 10),
+            tokens: [0, 0, 100, 100, 100],
+            color: '#14213d',
+            text_color: 'white',
+          },
+
+          # === Việt Nam Railways (VNR) ===
+          # Succeeds the Doumer Fund when it closes on phase 5+1 (see
+          # event_doumer_fund_closes! and VNR_* constants in game.rb). A normal
+          # operating corporation -- unlike the Doumer Fund -- but it needs 50%
+          # of its shares sold before it floats, its treasury is a fixed seed
+          # (plus whatever the Doumer Fund had accumulated from nationalized
+          # corporations) rather than the usual per-share float proceeds, and
+          # its capitalization is full so buying its shares never funds it.
+          {
+            sym: 'VNR',
+            name: 'Việt Nam Railways',
+            logo: '1881/DOUMER',
+            simple_logo: '1881/DOUMER.alt',
+            float_percent: 50,
+            capitalization: 'full',
             tokens: [0, 0, 100, 100, 100],
             color: '#14213d',
             text_color: 'white',

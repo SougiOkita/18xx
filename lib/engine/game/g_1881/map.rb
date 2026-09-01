@@ -67,7 +67,7 @@ module Engine
           'HN' => {
             'count' => 1,
             'color' => 'yellow',
-            'code' => 'city=revenue:50;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0;path=a:5,b:_0;label=HN',
+            'code' => 'city=revenue:10;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0;path=a:5,b:_0;label=HN',
           },
           'HN2' => {
             'count' => 1,
@@ -84,7 +84,7 @@ module Engine
           'SG' => {
             'count' => 1,
             'color' => 'yellow',
-            'code' => 'city=revenue:30;path=a:0,b:_0;path=a:4,b:_0;label=SG',
+            'code' => 'city=revenue:20;path=a:0,b:_0;path=a:4,b:_0;label=SG',
           },
           'SG2' => {
             'count' => 1,
@@ -308,7 +308,7 @@ module Engine
             # Plain blank (no terrain cost)
             %w[D7 G14 F9 G6 G10 E10 H15 I14 I30
                J29 K24 K26 K28 H27 G28 H29 D31
-               B33 C36 E34 L21] => '',
+               B33 C36 E34 L21] => 'upgrade=cost:30,terrain:mine',
 
             # Mountain 60
             %w[B5 C6 C10 D3 F3 F13 H17 H19] =>
@@ -389,7 +389,7 @@ module Engine
             ['F7'] => 'town=revenue:0;town=revenue:0;upgrade=cost:30,terrain:water',
 
             # Tan Mai & Hoang Mai (G12)
-            ['G12'] => 'town=revenue:0;town=revenue:0',
+            ['G12'] => 'town=revenue:0;town=revenue:0;upgrade=cost:30,terrain:mountain',
 
             # Duc Minh & Huong Son (F15, mountain 60)
             ['F15'] => 'town=revenue:0;town=revenue:0;upgrade=cost:60,terrain:mountain',
@@ -401,7 +401,7 @@ module Engine
             ['C32'] => 'town=revenue:0;town=revenue:0',
 
             # Phan Thiet & Lam Dong (J31)
-            ['J31'] => 'town=revenue:0;town=revenue:0',
+            ['J31'] => 'town=revenue:0;town=revenue:0;upgrade=cost:30,terrain:river',
 
             # --- Single-town hexes ---
             # Bien Hoa (G30)
@@ -411,7 +411,7 @@ module Engine
             ['J5'] => 'town=revenue:0;upgrade=cost:40,terrain:water',
 
             # Tra Vinh (D37, water 60)
-            ['D37'] => 'town=revenue:0;upgrade=cost:60,terrain:water',
+            ['D37'] => 'town=revenue:0;upgrade=cost:40,terrain:water',
 
             # Vung Tau (H33, river 40)
             ['H33'] => 'town=revenue:0;upgrade=cost:40,terrain:water',
@@ -420,7 +420,8 @@ module Engine
             ['H21'] => 'town=revenue:0;upgrade=cost:30,terrain:mountain',
 
             # Plain towns (no terrain)
-            %w[J21 I18 J27 E4 I4 D9] => 'town=revenue:0',
+            %w[J21 J27 E4 I4 D9] => 'town=revenue:0',
+            %w[I18] => 'town=revenue:0;upgrade=cost:30,terrain:mine',
           },
         }.freeze
 

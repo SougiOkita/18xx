@@ -27,8 +27,8 @@ module Engine
         # Vietnamese Dong
         CURRENCY_FORMAT_STR = '₫%s'
 
-        # Unlimited bank (represented as very large number)
-        BANK_CASH = 99_999
+        #
+        BANK_CASH = 14000
         TOTAL_STARTING_CASH = 1800
 
 
@@ -54,6 +54,20 @@ module Engine
         LOAN_VALUE = 100
         LOAN_INTEREST = 10
         NUM_DOUMER_LOANS = DOUMER_STARTING_CASH / LOAN_VALUE
+        # The Doumer fund's own share price can never move below this floor.
+        DOUMER_MIN_PRICE = 50
+
+        # =====================================================================
+        # VIỆT NAM RAILWAYS (VNR)
+        # Founded when the Doumer fund closes on phase 5+1. See "DOUMER FUND
+        # CLOSURE" section below for the full event.
+        # =====================================================================
+        VNR_ID = 'VNR'
+        VNR_STARTING_CASH = 1000
+        VNR_MIN_PAR_PRICE = 100
+        # Once VNR is founded, an inherited train roster larger than the train
+        # limit is trimmed down to (at most) this many trains.
+        VNR_MAX_TRAINS = 3
 
         # STOCK MARKET
         # Par zones: p=yellow (always); x=green par (155, unlocked by green_par event); z=brown par (247, unlocked by brown_par event)
@@ -92,6 +106,9 @@ module Engine
           green_par: ['Green par available', 'Corporations may now par at green price (₫155)'],
           brown_par: ['Brown par available', 'Corporations may now par at brown price (₫247)'],
           diesel_purchased: ['First D train sold', 'End game triggered — complete this OR set then play one more'],
+          doumer_fund_closes: ['Doumer fund closes',
+                                'Outstanding loans are repaid or force nationalization; Việt Nam Railways is ' \
+                                'founded and inherits its assets; no more loans may be taken'],
         ).freeze
 
         # =====================================================================
@@ -138,6 +155,7 @@ module Engine
             train_limit: 3,
             tiles: %i[yellow green brown],
             operating_rounds: 3,
+            events: [{ 'type' => 'doumer_fund_closes' }],
           },
           {
             name: '6',
@@ -594,7 +612,13 @@ module Engine
         end
 
         def float_corporation(corporation)
-          super
+          # VNR's treasury is a fixed seed (see event_doumer_fund_closes!), not the
+          # usual par-price × shares lump sum that :full capitalization would pay out.
+          if corporation.id == self.class::VNR_ID
+            @log << "#{corporation.name} floats"
+          else
+            super
+          end
 
           return unless self.class::TRANCHE_ELIGIBLE_CORPS.include?(corporation.id)
           return if @tranches.empty?   # concession phase — tranches not yet built
@@ -886,6 +910,10 @@ module Engine
           @doumer ||= corporation_by_id(self.class::DOUMER_ID)
         end
 
+        def vnr
+          @vnr ||= corporation_by_id(self.class::VNR_ID)
+        end
+
         # Pars and floats the Doumer fund immediately at game start, seeded with
         # a fixed treasury rather than the usual per-share float proceeds.
         def setup_doumer_fund
@@ -1022,8 +1050,8 @@ module Engine
         # Mirrors the emergency-train-purchase liquidation (Step::Bankrupt#sell_bankrupt_shares):
         # sell every sellable bundle the player holds, across all corporations,
         # largest bundle first, bypassing the normal once-per-turn sell limits.
-        def force_sell_all_shares!(player)
-          @log << "#{player.name} is forced to sell shares to cover #{doumer.name} interest"
+        def force_sell_all_shares!(player, reason: 'interest')
+          @log << "#{player.name} is forced to sell shares to cover #{doumer.name} #{reason}"
 
           player.shares_by_corporation(sorted: true).each do |corporation, _|
             next unless corporation.share_price
@@ -1044,6 +1072,7 @@ module Engine
           @doumer_interest_pool = 0
           d = doumer
           return unless d
+          return if d.closed?
 
           per_share = pool / d.total_shares.to_f
           total_paid = 0
@@ -1070,13 +1099,24 @@ module Engine
         end
 
         # Moves the Doumer fund's own share price: right if any corporation took
-        # a loan this OR, left if none did.
+        # a loan this OR, left if none did. The price can never fall below
+        # DOUMER_MIN_PRICE -- a left move that would breach the floor is reverted.
         def move_doumer_price!
           d = doumer
           return unless d&.share_price
+          return if d.closed?
 
           old_price = d.share_price
-          @doumer_loan_taken_this_or ? stock_market.move_right(d) : stock_market.move_left(d)
+          if @doumer_loan_taken_this_or
+            stock_market.move_right(d)
+          else
+            stock_market.move_left(d)
+            if d.share_price.price < self.class::DOUMER_MIN_PRICE
+              d.share_price.corporations.delete(d)
+              d.share_price = old_price
+              old_price.corporations << d
+            end
+          end
           log_share_price(d, old_price)
         end
 
@@ -1084,6 +1124,145 @@ module Engine
           super
           distribute_doumer_interest!
           move_doumer_price!
+        end
+
+        # =====================================================================
+        # DOUMER FUND CLOSURE (phase 5+1) -- see VNR_* constants above
+        # =====================================================================
+
+        # Fires once, on phase 5+1. Every corporation still carrying a Doumer
+        # fund loan must repay it in full first (payoff_all_loans_for_doumer_closure!,
+        # same collection cascade as interest, nationalizing anyone who still can't
+        # cover it); then the Doumer fund is dissolved, Việt Nam Railways (VNR) is
+        # founded to take its place, and no further loans may ever be taken.
+        def event_doumer_fund_closes!
+          @log << "-- Event: #{self.class::EVENTS_TEXT[:doumer_fund_closes][0]} --"
+
+          payoff_all_loans_for_doumer_closure!
+
+          d = doumer
+          v = vnr
+          return unless d
+          return unless v
+
+          par_price = if d.share_price.price >= self.class::VNR_MIN_PAR_PRICE
+                        d.share_price
+                      else
+                        stock_market.par_prices.find { |p| p.price == self.class::VNR_MIN_PAR_PRICE }
+                      end
+          stock_market.set_par(v, par_price)
+          v.ipoed = true
+          @log << "#{v.name} pars at #{format_currency(par_price.price)} " \
+                  "(#{d.name}'s current share price, minimum #{format_currency(self.class::VNR_MIN_PAR_PRICE)})"
+
+          convert_doumer_tokens_to_vnr!(d, v)
+          transfer_doumer_assets_to_vnr!(d, v)
+
+          @loans = []
+          d.close!
+          @log << "#{d.name} closes permanently -- no further Doumer fund loans may be taken"
+        end
+
+        # Every corporation with an outstanding loan must pay it back in full,
+        # using the exact same cascade as interest collection (Game#collect_doumer_interest!):
+        # corp treasury first, then the president's cash, then a forced sale of
+        # every sellable share the president holds. A corporation that still can't
+        # cover the balance is nationalized instead of being forgiven.
+        def payoff_all_loans_for_doumer_closure!
+          (minors + corporations).each do |entity|
+            next if entity == doumer || entity.loans.empty?
+
+            owed = entity.loans.size * self.class::LOAN_VALUE
+            collected = 0
+            president = entity.player
+
+            collected += spend_toward_doumer_interest!(entity, owed - collected)
+            collected += spend_toward_doumer_interest!(president, owed - collected) if president
+
+            if president && (owed - collected).positive?
+              force_sell_all_shares!(president, reason: 'loan')
+              collected += spend_toward_doumer_interest!(president, owed - collected)
+            end
+
+            if (owed - collected).positive?
+              @log << "#{entity.name} cannot repay #{format_currency(owed - collected)} of its " \
+                      "#{doumer.name} loans even after #{president&.name || 'its'} forced share sale " \
+                      "-- #{entity.name} is nationalized"
+              nationalize_corporation!(entity, nil)
+              next
+            end
+
+            num_loans = entity.loans.size
+            entity.loans.clear
+            @log << "#{entity.name} pays off #{num_loans} outstanding #{doumer.name} loan(s) " \
+                    "(#{format_currency(owed)}) ahead of its closure"
+          end
+        end
+
+        # Any token currently on the map belonging to the Doumer fund (placed via
+        # nationalize_corporation!) becomes a VNR token in place.
+        def convert_doumer_tokens_to_vnr!(d, v)
+          converted = 0
+          hexes.each do |hex|
+            hex.tile.cities.each do |city|
+              city.tokens.each do |token|
+                next unless token&.corporation == d
+
+                token.corporation = v
+                token.logo = v.logo
+                token.simple_logo = v.simple_logo
+                converted += 1
+              end
+            end
+          end
+          @log << "#{converted} #{d.name} token(s) on the map become #{v.name} tokens" if converted.positive?
+        end
+
+        # VNR is seeded with a fixed treasury (VNR_STARTING_CASH) plus whatever cash
+        # the Doumer fund had accumulated from nationalized corporations, and inherits
+        # every train and company the Doumer fund was holding for the same reason.
+        # Buying VNR shares never adds to this -- see the float_corporation override.
+        def transfer_doumer_assets_to_vnr!(d, v)
+          @bank.spend(self.class::VNR_STARTING_CASH, v)
+          @log << "#{v.name} receives #{format_currency(self.class::VNR_STARTING_CASH)} starting capital"
+
+          if d.cash.positive?
+            inherited = d.cash
+            d.spend(inherited, v)
+            @log << "#{v.name} receives #{format_currency(inherited)} inherited from nationalized " \
+                    "corporations via #{d.name}"
+          end
+
+          unless d.trains.empty?
+            d.trains.each { |t| t.owner = v }
+            v.trains.concat(d.trains)
+            d.trains.clear
+          end
+          cap_vnr_trains!(v)
+
+          return if d.companies.empty?
+
+          d.companies.each { |c| c.owner = v }
+          v.companies.concat(d.companies)
+          d.companies.clear
+        end
+
+        # If VNR's inherited (non-+1) train roster is larger than the current train
+        # limit, keep only the VNR_MAX_TRAINS highest-rated ones (by position in the
+        # TRAINS progression) and return the rest to the depot.
+        def cap_vnr_trains!(v)
+          normal_trains = v.trains.reject { |t| t.name == '+1' }
+          return if normal_trains.size <= train_limit(v)
+
+          rank = self.class::TRAINS.each_with_index.to_h { |t, i| [t[:name], i] }
+          keep = normal_trains.sort_by { |t| -(rank[t.name] || -1) }.first(self.class::VNR_MAX_TRAINS)
+          discard = normal_trains - keep
+          return if discard.empty?
+
+          @log << "#{v.name}'s inherited trains exceed the train limit -- keeps its " \
+                  "#{self.class::VNR_MAX_TRAINS} highest-rated trains (#{keep.map(&:name).join(', ')}) " \
+                  "and returns #{discard.map(&:name).join(', ')} to the depot"
+          discard.each { |t| depot.reclaim_train(t) }
         end
 
         # The corporation currently awaiting its ex-president's token choice
