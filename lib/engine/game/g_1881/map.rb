@@ -306,8 +306,8 @@ module Engine
           white: {
             # --- Blank terrain hexes (no city/town) ---
             # Plain blank (no terrain cost)
-            %w[D5 D7 G14 E8 F5 F9 G6 G8 G10 E10 H15 I14 I30 I32
-               J29 K24 K26 K28 L27 H27 G28 H29 H31 D31
+            %w[D7 G14 F9 G6 G10 E10 H15 I14 I30
+               J29 K24 K26 K28 H27 G28 H29 D31
                B33 C36 E34 L21] => '',
 
             # Mountain 60
@@ -315,14 +315,14 @@ module Engine
               'upgrade=cost:60,terrain:mountain',
 
             # Mountain 30
-            %w[J23 J25 I22 D5 E4 F5] => 'upgrade=cost:30,terrain:mountain',
+            %w[J23 J25 I22 D5 F5] => 'upgrade=cost:30,terrain:mountain',
 
             # Water 60 (river crossing)
             %w[E32 K22 C34 D35 E36 I16] =>
               'upgrade=cost:60,terrain:water',
 
             # Water 40
-            %w[H5 H7 E8 F7 G8 H31 I32 L27] => 'upgrade=cost:40,terrain:water',
+            %w[H5 H7 E8 G8 H31 I32 L27] => 'upgrade=cost:40,terrain:water',
 
             # Forest 30 (approximated as mountain terrain for cost)
             ['I20'] => 'upgrade=cost:30,terrain:mountain',
