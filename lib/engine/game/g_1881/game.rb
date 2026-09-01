@@ -616,7 +616,7 @@ module Engine
         end
 
         def new_stock_round
-          if @stock_round_count.positive?
+          if @stock_round_count.positive? && @tranche_exhausted
             @current_tranche_idx = [@current_tranche_idx + 1, @tranches.size].min
             @tranche_exhausted = false
             if @current_tranche_idx < @tranches.size
@@ -788,7 +788,7 @@ module Engine
             return
           end
 
-          share_pool.buy_shares(buyer, share, exchange: :free, allow_president_change: false)
+          share_pool.buy_shares(buyer, share, exchange: :free, allow_president_change: true)
           @log << "#{buyer.name} receives one share of #{corp.name} via #{company.name}"
 
           # player → bank already happened in assign_private!; redirect bank → corp
@@ -833,7 +833,7 @@ module Engine
           @reserved_redeemed['C3'] = true
           share.buyable = true
           @reserved_shares.delete('C3')
-          share_pool.buy_shares(player, share, exchange: :free, allow_president_change: false)
+          share_pool.buy_shares(player, share, exchange: :free, allow_president_change: true)
           company.revenue = 0
           @log << "#{player.name} redeems #{company.name} for one share of #{reserved_corp&.name}"
           @log << "#{company.name} revenue drops to #{format_currency(0)}"
