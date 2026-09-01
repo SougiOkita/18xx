@@ -56,6 +56,9 @@ module Engine
         NUM_DOUMER_LOANS = DOUMER_STARTING_CASH / LOAN_VALUE
         # The Doumer fund's own share price can never move below this floor.
         DOUMER_MIN_PRICE = 50
+        # Per-corporation loan cap (independent of the shared pool size above).
+        MINOR_LOAN_LIMIT = 2
+        MAJOR_LOAN_LIMIT = 5
 
         # =====================================================================
         # VIỆT NAM RAILWAYS (VNR)
@@ -939,8 +942,16 @@ module Engine
           Array.new(self.class::NUM_DOUMER_LOANS) { |id| Loan.new(id, self.class::LOAN_VALUE) }
         end
 
-        def maximum_loans(_entity)
-          self.class::NUM_DOUMER_LOANS
+        # Per-corporation cap: minors (SFTC/FMT, the two corps floated via
+        # MINOR_PRIVATE_MAP) may hold at most MINOR_LOAN_LIMIT loans; every
+        # other corporation may hold at most MAJOR_LOAN_LIMIT. Independent of
+        # NUM_DOUMER_LOANS, which is the size of the shared loan pool.
+        def maximum_loans(entity)
+          minor_corp?(entity) ? self.class::MINOR_LOAN_LIMIT : self.class::MAJOR_LOAN_LIMIT
+        end
+
+        def minor_corp?(entity)
+          self.class::MINOR_PRIVATE_MAP.value?(entity.id)
         end
 
         def loan_value(_entity = nil)
@@ -980,6 +991,10 @@ module Engine
         end
 
         def take_doumer_loan(entity)
+          if entity.loans.size >= maximum_loans(entity)
+            raise GameError, "#{entity.name} already holds the maximum of #{maximum_loans(entity)} loans"
+          end
+
           loan = @loans.shift
           raise GameError, 'No loans available from the Doumer fund' unless loan
 

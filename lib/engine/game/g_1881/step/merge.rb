@@ -39,6 +39,9 @@ module Engine
 
           def candidates(entity)
             return [] unless entity.floated?
+            # Minors may only be merged INTO a major -- they can never survive a
+            # merge themselves, so a minor is never offered any merge candidates.
+            return [] if @game.minor_corp?(entity)
 
             @game.corporations.select do |corp|
               next false if corp == entity

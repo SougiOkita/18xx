@@ -20,6 +20,20 @@ describe Engine::Game::G1881::Game do
     game.bank.spend(seed, cfi)
   end
 
+  def float_corp!(corp, par_price: 65, seed: 130, president: player_a)
+    par = game.stock_market.par_prices.find { |p| p.price == par_price }
+    game.stock_market.set_par(corp, par)
+    game.share_pool.buy_shares(president, corp.shares.first, exchange: :free, allow_president_change: true)
+    game.bank.spend(seed, corp)
+  end
+
+  # Any market cell at this price, not just par-eligible ones.
+  def market_cell_at(price)
+    cell = nil
+    game.stock_market.instance_variable_get(:@market).each { |row| row.each { |c| cell ||= c if c&.price == price } }
+    cell
+  end
+
   describe 'setup_doumer_fund' do
     it 'pars and floats the Doumer fund automatically at game start' do
       expect(doumer.ipoed).to eq(true)
@@ -44,7 +58,14 @@ describe Engine::Game::G1881::Game do
     it 'creates NUM_DOUMER_LOANS loans worth LOAN_VALUE each' do
       expect(game.loans.size).to eq(Engine::Game::G1881::Game::NUM_DOUMER_LOANS)
       expect(game.loans).to all(have_attributes(amount: Engine::Game::G1881::Game::LOAN_VALUE))
-      expect(game.maximum_loans(cfi)).to eq(Engine::Game::G1881::Game::NUM_DOUMER_LOANS)
+    end
+
+    it 'caps minors at MINOR_LOAN_LIMIT and majors at MAJOR_LOAN_LIMIT loans' do
+      sftc = game.corporation_by_id('SFTC')
+      expect(game.minor_corp?(cfi)).to eq(false)
+      expect(game.minor_corp?(sftc)).to eq(true)
+      expect(game.maximum_loans(cfi)).to eq(Engine::Game::G1881::Game::MAJOR_LOAN_LIMIT)
+      expect(game.maximum_loans(sftc)).to eq(Engine::Game::G1881::Game::MINOR_LOAN_LIMIT)
     end
 
     it 'take_doumer_loan moves cash from Doumer to the corp and records the loan' do
@@ -71,10 +92,23 @@ describe Engine::Game::G1881::Game do
       expect { game.payoff_doumer_loan(cfi) }.to raise_error(Engine::GameError, /no loans to pay off/)
     end
 
-    it 'take_doumer_loan raises when the fund has no loans left' do
+    it 'take_doumer_loan raises once a corporation reaches its own loan cap' do
       float_cfi!
-      Engine::Game::G1881::Game::NUM_DOUMER_LOANS.times { game.take_doumer_loan(cfi) }
-      expect { game.take_doumer_loan(cfi) }.to raise_error(Engine::GameError, /No loans available/)
+      Engine::Game::G1881::Game::MAJOR_LOAN_LIMIT.times { game.take_doumer_loan(cfi) }
+      expect { game.take_doumer_loan(cfi) }
+        .to raise_error(Engine::GameError, /already holds the maximum of 5 loans/)
+    end
+
+    it 'take_doumer_loan raises once the shared loan pool is exhausted' do
+      majors = %w[CFI STC CFCA TMR HPR].map { |id| game.corporation_by_id(id) }
+      majors.each { |corp| float_corp!(corp) }
+      # NUM_DOUMER_LOANS (20) / MAJOR_LOAN_LIMIT (5) == 4 corps to fully drain the pool
+      majors.first(4).each do |corp|
+        Engine::Game::G1881::Game::MAJOR_LOAN_LIMIT.times { game.take_doumer_loan(corp) }
+      end
+      expect(game.loans).to be_empty
+
+      expect { game.take_doumer_loan(majors.last) }.to raise_error(Engine::GameError, /No loans available/)
     end
   end
 
@@ -143,9 +177,15 @@ describe Engine::Game::G1881::Game do
 
     it 'sets pending_nationalization when even the forced sale cannot cover the debt' do
       float_cfi!
-      Engine::Game::G1881::Game::NUM_DOUMER_LOANS.times { game.take_doumer_loan(cfi) } # owed = 200
+      Engine::Game::G1881::Game::MAJOR_LOAN_LIMIT.times { game.take_doumer_loan(cfi) } # owed = 50
       cfi.spend(cfi.cash, game.bank)
       player_a.spend(player_a.cash, game.bank)
+      # Crash CFI's share price first so the forced sale of its president's
+      # certificate can't raise enough to cover even this reduced debt.
+      cheap = market_cell_at(24)
+      cfi.share_price.corporations.delete(cfi)
+      cfi.share_price = cheap
+      cheap.corporations << cfi
 
       game.collect_doumer_interest!(cfi)
 

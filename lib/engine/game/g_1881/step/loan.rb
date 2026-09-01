@@ -35,7 +35,7 @@ module Engine
           end
 
           def can_take_loan?(entity)
-            @game.loans.any?
+            @game.loans.any? && entity.loans.size < @game.maximum_loans(entity)
           end
 
           def can_payoff_loan?(entity)
