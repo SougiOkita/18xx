@@ -6,9 +6,19 @@ describe Engine::Game::G1881::Game do
   let(:players) { %w[a b c] }
   let(:game) { Engine::Game::G1881::Game.new(players) }
   let(:doumer) { game.doumer }
+  let(:vnr) { game.vnr }
   let(:cfi) { game.corporation_by_id('CFI') }
   let(:player_a) { game.players.find { |p| p.id == 'a' } }
   let(:player_b) { game.players.find { |p| p.id == 'b' } }
+  let(:player_c) { game.players.find { |p| p.id == 'c' } }
+
+  # Buys `n` 10% Doumer shares for `player` from the fund's own IPO.
+  def buy_doumer_shares!(player, n)
+    n.times do
+      share = doumer.shares.find { |s| !s.president && s.owner == doumer && s.buyable }
+      game.share_pool.buy_shares(player, share, exchange: :free, allow_president_change: true)
+    end
+  end
 
   # Pars and floats CFI with player_a as president, seeded with `seed` cash
   # in the corp treasury (mirrors float_via_private! without needing the
@@ -293,6 +303,194 @@ describe Engine::Game::G1881::Game do
       expect(game.mergeable?(cfi)).to eq(true)
       game.nationalize_corporation!(cfi, nil)
       expect(game.mergeable?(cfi)).to eq(false)
+    end
+
+    it 'moves the active fund\'s share price right by one step' do
+      float_cfi!
+      old_price = doumer.share_price.price
+      game.nationalize_corporation!(cfi, nil)
+      expect(doumer.share_price.price).to be > old_price
+    end
+
+    it 'moves VNR\'s price instead once the Doumer fund has closed' do
+      old_doumer_price = doumer.share_price.price
+      game.event_doumer_fund_closes!
+      float_cfi!
+      cfi.loans << Engine::Loan.new(0, Engine::Game::G1881::Game::LOAN_VALUE) # give it something to "owe"
+      old_vnr_price = vnr.share_price.price
+
+      game.nationalize_corporation!(cfi, nil)
+
+      expect(vnr.share_price.price).to be > old_vnr_price
+      expect(doumer.share_price).to be_nil # closed fund has no share price left to move
+      expect(old_doumer_price).to be_a(Integer) # (sanity check the pre-closure price was captured)
+    end
+  end
+
+  describe 'carry_over_doumer_shares_to_vnr!' do
+    it 'gives each Doumer shareholder the same percentage of VNR' do
+      buy_doumer_shares!(player_a, 3) # 30%
+      buy_doumer_shares!(player_b, 2) # 20%
+      buy_doumer_shares!(player_c, 1) # 10%
+
+      game.event_doumer_fund_closes!
+
+      expect(player_a.percent_of(vnr)).to eq(30)
+      expect(player_b.percent_of(vnr)).to eq(20)
+      expect(player_c.percent_of(vnr)).to eq(10)
+      expect(vnr.percent_of(vnr)).to eq(40) # the 40% Doumer never sold stays unsold in VNR too
+    end
+
+    it 'makes the largest Doumer holder VNR\'s founding president when they reach the threshold' do
+      buy_doumer_shares!(player_a, 3) # 30% -- above presidents_percent (20%)
+      buy_doumer_shares!(player_b, 1) # 10%
+
+      game.event_doumer_fund_closes!
+
+      expect(vnr.owner).to eq(player_a)
+    end
+
+    it 'floats VNR immediately at closure if the carried-over percentage already clears float_percent' do
+      buy_doumer_shares!(player_a, 3)
+      buy_doumer_shares!(player_b, 2) # 50% combined -- VNR's float_percent
+
+      game.event_doumer_fund_closes!
+
+      expect(vnr.floated?).to eq(true)
+    end
+
+    it 'leaves VNR unowned when no single holder reaches the presidents_percent threshold' do
+      buy_doumer_shares!(player_a, 1) # 10%
+      buy_doumer_shares!(player_b, 1) # 10%
+      buy_doumer_shares!(player_c, 1) # 10%
+
+      game.event_doumer_fund_closes!
+
+      expect(vnr.owner).to be_nil
+      expect(player_a.percent_of(vnr)).to eq(10)
+    end
+
+    it 'does nothing when nobody held any Doumer shares' do
+      expect { game.event_doumer_fund_closes! }.not_to raise_error
+      expect(vnr.percent_of(vnr)).to eq(100)
+      expect(vnr.floated?).to eq(false)
+    end
+  end
+
+  describe 'VNR founder\'s tile/token ability' do
+    def float_vnr_via_carry_over!(pct_for_a: 5)
+      buy_doumer_shares!(player_a, pct_for_a)
+      game.event_doumer_fund_closes!
+    end
+
+    it 'is not pending until VNR actually floats' do
+      expect(game.vnr_founders_pending?).to eq(false)
+    end
+
+    it 'becomes pending the moment VNR floats' do
+      float_vnr_via_carry_over!
+      expect(game.vnr_founders_pending?).to eq(true)
+      expect(game.vnr_founders_tile_pending?).to eq(true)
+    end
+
+    # define_singleton_method's block runs with self rebound to the step, so
+    # it needs a real local variable (not an rspec `let`) in its closure.
+    def tile_step_for(v)
+      step = Engine::Game::G1881::Step::VnrFoundersTile.new(game, game.round)
+      step.define_singleton_method(:current_entity) { v }
+      step
+    end
+
+    def token_step_for(v)
+      step = Engine::Game::G1881::Step::VnrFoundersToken.new(game, game.round)
+      step.define_singleton_method(:current_entity) { v }
+      step
+    end
+
+    it 'stays reserved (not usable) if VNR floats with no single holder at the presidents_percent' do
+      stc = game.corporation_by_id('STC')
+      float_cfi! # gives CFI treasury cash to spend
+      float_corp!(stc, president: player_b)
+      # Five 10% holders (players + the two just-floated corps) = 50%, none >= 20%.
+      buy_doumer_shares!(player_a, 1)
+      buy_doumer_shares!(player_b, 1)
+      buy_doumer_shares!(player_c, 1)
+      [cfi, stc].each do |corp|
+        share = doumer.shares.find { |s| !s.president && s.owner == doumer && s.buyable }
+        game.share_pool.buy_shares(corp, share, exchange: :free, allow_president_change: true)
+      end
+
+      game.event_doumer_fund_closes!
+
+      expect(vnr.floated?).to eq(true)
+      expect(vnr.owner).to be_nil
+      expect(tile_step_for(vnr).eligible?(vnr)).to be_falsey
+    end
+
+    it 'lets the president lay a founding tile on any unclaimed city hex, charging full terrain cost' do
+      float_vnr_via_carry_over!
+      hex = game.hex_by_id('I28') # mountain 40
+      cash_before = vnr.cash
+
+      step = tile_step_for(vnr)
+      tile = Engine::Tile.for('5')
+      rotation = (0..5).find do |r|
+        tile.rotate!(r)
+        step.legal_tile_rotation?(vnr, hex, tile)
+      end
+
+      step.process_lay_tile(Engine::Action::LayTile.new(vnr, tile: tile, hex: hex, rotation: rotation))
+
+      expect(hex.tile.name).to eq('5')
+      expect(vnr.cash).to eq(cash_before - 40)
+      expect(game.vnr_founders_token_pending?).to eq(hex)
+    end
+
+    it 'rejects a founding tile with no city' do
+      float_vnr_via_carry_over!
+      step = tile_step_for(vnr)
+      plain_tile = Engine::Tile.for('8')
+
+      action = Engine::Action::LayTile.new(vnr, tile: plain_tile, hex: game.hex_by_id('D7'), rotation: 0)
+      expect { step.process_lay_tile(action) }.to raise_error(Engine::GameError, /has no city/)
+    end
+
+    it 'then lets the president place the founding token on that same city, and marks the ability used' do
+      float_vnr_via_carry_over!
+      hex = game.hex_by_id('C8')
+      tile_step = tile_step_for(vnr)
+      tile = Engine::Tile.for('5')
+      rotation = (0..5).find do |r|
+        tile.rotate!(r)
+        tile_step.legal_tile_rotation?(vnr, hex, tile)
+      end
+      tile_step.process_lay_tile(Engine::Action::LayTile.new(vnr, tile: tile, hex: hex, rotation: rotation))
+
+      token_step = token_step_for(vnr)
+      city = hex.tile.cities.first
+
+      token_step.process_place_token(Engine::Action::PlaceToken.new(vnr, city: city))
+
+      expect(city.tokens.compact.map(&:corporation)).to include(vnr)
+      expect(game.vnr_founders_pending?).to eq(false)
+    end
+
+    it 'rejects placing the founding token on a hex other than the one just laid' do
+      float_vnr_via_carry_over!
+      hex = game.hex_by_id('C8')
+      tile_step = tile_step_for(vnr)
+      tile = Engine::Tile.for('5')
+      rotation = (0..5).find do |r|
+        tile.rotate!(r)
+        tile_step.legal_tile_rotation?(vnr, hex, tile)
+      end
+      tile_step.process_lay_tile(Engine::Action::LayTile.new(vnr, tile: tile, hex: hex, rotation: rotation))
+
+      token_step = token_step_for(vnr)
+      other_city = game.hex_by_id('G4').tile.cities.first
+
+      action = Engine::Action::PlaceToken.new(vnr, city: other_city)
+      expect { token_step.process_place_token(action) }.to raise_error(Engine::GameError, /founding hex/)
     end
   end
 end

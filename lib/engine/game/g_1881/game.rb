@@ -13,6 +13,8 @@ require_relative 'step/loan'
 require_relative 'step/pay_interest'
 require_relative 'step/nationalization'
 require_relative 'step/merge'
+require_relative 'step/vnr_founders_tile'
+require_relative 'step/vnr_founders_token'
 require_relative '../../loan'
 require_relative '../base'
 
@@ -482,6 +484,14 @@ module Engine
           @doumer_loan_taken_this_or = false
           @pending_nationalization = nil
           @nationalized_corps = []
+
+          # VNR founder's tile/token ability -- unlocked once VNR floats (see
+          # float_corporation), usable once a president exists (see
+          # step/vnr_founders_tile.rb and step/vnr_founders_token.rb).
+          @vnr_founders_pending = false
+          @vnr_founders_tile_laid_hex = nil
+          @vnr_founders_used = false
+
           setup_doumer_fund
         end
 
@@ -619,6 +629,8 @@ module Engine
           # usual par-price × shares lump sum that :full capitalization would pay out.
           if corporation.id == self.class::VNR_ID
             @log << "#{corporation.name} floats"
+            @vnr_founders_pending = true
+            @log << "#{corporation.name}'s president may lay a founding tile/token anywhere on the map"
           else
             super
           end
@@ -1170,6 +1182,7 @@ module Engine
           @log << "#{v.name} pars at #{format_currency(par_price.price)} " \
                   "(#{d.name}'s current share price, minimum #{format_currency(self.class::VNR_MIN_PAR_PRICE)})"
 
+          carry_over_doumer_shares_to_vnr!(d, v)
           convert_doumer_tokens_to_vnr!(d, v)
           transfer_doumer_assets_to_vnr!(d, v)
 
@@ -1212,6 +1225,43 @@ module Engine
             @log << "#{entity.name} pays off #{num_loans} outstanding #{doumer.name} loan(s) " \
                     "(#{format_currency(owed)}) ahead of its closure"
           end
+        end
+
+        # Every player's or corporation's holding of Doumer fund shares carries
+        # over into the same percentage of VNR -- a direct 1:1 exchange, not a
+        # fresh sale. Whatever percentage of the Doumer fund was never sold to
+        # anyone (still held by the fund itself) simply stays unsold in VNR's
+        # own IPO. The largest holder receives VNR's presidents_share directly
+        # if their carried-over stake reaches the presidents_percent threshold
+        # (this is how VNR gets its founding president, if it gets one at all
+        # here); every holder's remaining percentage is filled in with ordinary
+        # 10% shares via the normal share_pool mechanism, so presidency and
+        # floated? bookkeeping stay fully consistent with a real purchase.
+        def carry_over_doumer_shares_to_vnr!(d, v)
+          holders = d.player_share_holders(corporate: true).select { |_h, pct| pct.positive? }
+          return if holders.empty?
+
+          ranked = holders.sort_by { |_h, pct| -pct }
+          remaining = ranked.to_h
+
+          top_holder, top_pct = ranked.first
+          if top_pct >= v.presidents_percent
+            share_pool.buy_shares(top_holder, v.presidents_share, exchange: :free, allow_president_change: true)
+            remaining[top_holder] = top_pct - v.presidents_percent
+          end
+
+          remaining.each do |holder, pct|
+            next unless pct.positive?
+
+            (pct / v.share_percent).to_i.times do
+              share = v.shares.find { |s| !s.president && s.owner == v && s.buyable }
+              break unless share
+
+              share_pool.buy_shares(holder, share, exchange: :free, allow_president_change: true)
+            end
+          end
+
+          @log << "#{d.name}'s shareholders carry their holdings over to #{v.name} at the same percentages"
         end
 
         # Any token currently on the map belonging to the Doumer fund (placed via
@@ -1280,10 +1330,57 @@ module Engine
           discard.each { |t| depot.reclaim_train(t) }
         end
 
+        # =====================================================================
+        # VNR FOUNDER'S TILE/TOKEN (one-time ability, unlocked when VNR floats)
+        # See G1881::Step::VnrFoundersTile / VnrFoundersToken.
+        # =====================================================================
+
+        # True from the moment VNR floats until the ability has been fully
+        # used (tile laid AND token placed). Does not by itself mean the
+        # ability can be *used* right now -- see vnr_founders_tile_pending?/
+        # vnr_founders_token_pending?, which also require a sitting president;
+        # with no president yet, the ability simply stays reserved.
+        def vnr_founders_pending?
+          @vnr_founders_pending && !@vnr_founders_used
+        end
+
+        def vnr_founders_tile_pending?
+          vnr_founders_pending? && !@vnr_founders_tile_laid_hex
+        end
+
+        def vnr_founders_token_pending?
+          vnr_founders_pending? && @vnr_founders_tile_laid_hex
+        end
+
+        def vnr_founders_tile_laid_hex
+          @vnr_founders_tile_laid_hex
+        end
+
+        def vnr_founders_tile_laid!(hex)
+          @vnr_founders_tile_laid_hex = hex
+        end
+
+        def vnr_founders_ability_used!
+          @vnr_founders_used = true
+          @vnr_founders_tile_laid_hex = nil
+        end
+
         # The corporation currently awaiting its ex-president's token choice
         # (see G1881::Step::Nationalization), or nil.
         def pending_nationalization
           @pending_nationalization
+        end
+
+        # Every nationalization moves whichever fund is currently active --
+        # the Doumer fund, or VNR after the Doumer fund has closed -- one
+        # step to the right on the stock market.
+        def move_fund_price_right_on_nationalization!
+          fund = doumer.closed? ? vnr : doumer
+          return unless fund&.share_price
+
+          old_price = fund.share_price
+          stock_market.move_right(fund)
+          log_share_price(fund, old_price)
         end
 
         # Nationalizes a corporation that could not pay its Doumer fund
@@ -1295,6 +1392,7 @@ module Engine
         # the corporation closes permanently and can never be parred again.
         def nationalize_corporation!(entity, hex_id)
           @pending_nationalization = nil
+          move_fund_price_right_on_nationalization!
           d = doumer
 
           if hex_id && !hex_id.empty?
@@ -1355,6 +1453,8 @@ module Engine
             Engine::Step::HomeToken,
             Engine::Step::Track,          # 2. Lay/upgrade tiles (phase-based)
             Engine::Step::Token,          # 3. Place station token
+            G1881::Step::VnrFoundersTile,  # 3b. VNR president's one-time founding tile, anywhere
+            G1881::Step::VnrFoundersToken, # 3c. ...and the founding token on it
             Engine::Step::Route,          # 4. Run trains (TODO: custom route logic)
             G1881::Step::Dividend,        # 5. Pay dividend
             G1881::Step::PayInterest,     # 5b. Deduct Doumer fund loan interest
