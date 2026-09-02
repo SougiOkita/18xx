@@ -203,9 +203,12 @@ module Engine
             ['C30'] =>
               'city=revenue:50;path=a:6,b:3;path=a:5,b:_0',
 
-            # Cambodia hub (west of Saigon)
+            # Cambodia hub (west of Saigon): a normal offboard -- every edge is
+            # a dead-end stub into the revenue node, none connect to each
+            # other, so no route can pass through it (edge 2 faces the
+            # Phnom Penh gate corridor via F25; see CAMBODIA_GATE_HEXES).
             ['G26'] =>
-              'offboard=revenue:yellow_20|green_40|brown_70;path=a:0,b:_0;path=a:2,b:6;path=a:5,b:2',
+              'offboard=revenue:yellow_20|green_40|brown_70;path=a:0,b:_0;path=a:2,b:_0;path=a:5,b:_0',
           },
 
           # =====================================================================

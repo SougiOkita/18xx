@@ -15,6 +15,7 @@ require_relative 'step/nationalization'
 require_relative 'step/merge'
 require_relative 'step/vnr_founders_tile'
 require_relative 'step/vnr_founders_token'
+require_relative 'step/redeem_private_share'
 require_relative '../../loan'
 require_relative '../base'
 
@@ -538,6 +539,19 @@ module Engine
           share&.buyable = true
         end
 
+        # The reserved Share object for this private (C3/N3/N4/S4), or nil once
+        # it's been redeemed or released. Used by G1881::Step::RedeemPrivateShare.
+        def reserved_share_for(private_id)
+          @reserved_shares[private_id]
+        end
+
+        # Called once a player redeems C3/N3/N4/S4 for its reserved share (see
+        # G1881::Step::RedeemPrivateShare): the share is now owned outright, so
+        # -- unlike release_reserved_share -- it does not go back on the market.
+        def clear_reserved_share!(private_id)
+          @reserved_shares.delete(private_id)
+        end
+
         def par_prices
           @stock_market.share_prices_with_types(@available_par_groups)
         end
@@ -649,6 +663,7 @@ module Engine
           Engine::Round::Stock.new(self, [
             Engine::Step::DiscardTrain,
             Engine::Step::Exchange,
+            G1881::Step::RedeemPrivateShare, # C3/N3/N4/S4: redeem for the reserved share, any time
             Engine::Step::SpecialTrack,
             Engine::Step::BuySellParShares,
           ])
@@ -753,14 +768,12 @@ module Engine
             return
           end
 
-          # C3: when a player buys it, immediately redeem the reserved share.
-          #     When a corporation buys it unredeemed, the share returns to the IPO.
+          # C3: a player buyer gets no special treatment at purchase time -- they
+          # keep the reservation (and the K18 upgrade block) and may redeem it for
+          # the reserved share at any point via G1881::Step::RedeemPrivateShare.
+          # When a corporation buys it unredeemed, the share returns to the IPO.
           if company.id == 'C3'
-            if buyer.is_a?(Engine::Player)
-              handle_c3_player_redemption(buyer, company)
-            else
-              handle_c3_company_purchase(buyer, company)
-            end
+            handle_c3_company_purchase(buyer, company) if buyer.is_a?(Engine::Corporation)
             return
           end
 
@@ -856,26 +869,6 @@ module Engine
             @log << "#{company.name} sold unredeemed — reserved #{reserved_corp&.name} share returns to IPO"
           end
           @log << "#{corp.name} owns #{company.name}"
-        end
-
-        # C3: when a player wins it in the private auction, immediately transfer
-        # the reserved central corp share to them. C3 revenue drops to ₫0 but
-        # the private is kept (still blocks K18 upgrades while a player holds it).
-        def handle_c3_player_redemption(player, company)
-          reserved_corp = corporation_by_id(@c3_reserved_corp_sym)
-          share = @reserved_shares['C3']
-          unless share
-            @log << "#{company.name}: no reserved share found for #{reserved_corp&.name}"
-            return
-          end
-
-          @reserved_redeemed['C3'] = true
-          share.buyable = true
-          @reserved_shares.delete('C3')
-          share_pool.buy_shares(player, share, exchange: :free, allow_president_change: true)
-          company.revenue = 0
-          @log << "#{player.name} redeems #{company.name} for one share of #{reserved_corp&.name}"
-          @log << "#{company.name} revenue drops to #{format_currency(0)}"
         end
 
         # C3: player-redeemable reserved share. When a corporation buys it unredeemed,
@@ -1151,6 +1144,17 @@ module Engine
           super
           distribute_doumer_interest!
           move_doumer_price!
+          export_train!
+        end
+
+        # During phases '2' and '3', one train of the current type exports
+        # from the depot at the end of every operating round (not just the OR
+        # set), to keep the train rush moving even if nobody's buying yet.
+        def export_train!
+          return unless %w[2 3].include?(@phase.name)
+          return if @depot.upcoming.empty?
+
+          @depot.export!
         end
 
         # =====================================================================
