@@ -410,9 +410,17 @@ module Engine
           # Players ordered by seating proximity to the auctioneer (nearest
           # neighbor first), auctioneer last, restricted to those who can
           # currently afford `price`.
+          # Force-assignment priority: the auctioneer themself first (they put
+          # it up and are the natural fallback buyer); then, in seating order
+          # starting after the auctioneer, whoever hasn't passed and can
+          # afford it; then that same seating order again for anyone who has
+          # passed but can still afford it.
           def nearest_affordable_player(price)
+            return @auctioneer if @auctioneer.cash >= price
+
             order = entities.rotate(entities.index(@auctioneer) + 1)
-            order.find { |player| player.cash >= price }
+            order.find { |player| !player.passed? && player.cash >= price } ||
+              order.find { |player| player.cash >= price }
           end
 
           def assign_private!(player, company, auctioneer, price)

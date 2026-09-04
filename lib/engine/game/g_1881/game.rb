@@ -7,6 +7,7 @@ require_relative 'round/auction'
 require_relative 'step/auction'
 require_relative 'step/buy_train'
 require_relative 'step/dividend'
+require_relative 'step/exchange'
 require_relative 'step/redeem_shares'
 require_relative 'step/issue_shares'
 require_relative 'step/loan'
@@ -15,7 +16,6 @@ require_relative 'step/nationalization'
 require_relative 'step/merge'
 require_relative 'step/vnr_founders_tile'
 require_relative 'step/vnr_founders_token'
-require_relative 'step/redeem_private_share'
 require_relative '../../loan'
 require_relative '../base'
 
@@ -531,25 +531,45 @@ module Engine
 
           share.buyable = false
           @reserved_shares[private_id] = share
+
+          # Grant the private itself a standard exchange ability against that
+          # reserved share, so the owning player can redeem it at any point via
+          # the Exchange step/UI (G1881::Step::Exchange is already in
+          # stock_round) -- private_id is always one of C3/N3/N4/S4 here.
+          company_by_id(private_id)&.add_ability(
+            Engine::Ability::Exchange.new(type: 'exchange', corporations: [corp_sym], from: ['reserved'])
+          )
         end
 
-        # Restore the reserved share to normal IPO availability.
+        # Restore the reserved share to normal IPO availability (the private was
+        # sold to a corporation unredeemed). Also strips the exchange ability
+        # granted in reserve_one_ipo_share, since there's nothing left to redeem.
         def release_reserved_share(private_id)
           share = @reserved_shares.delete(private_id)
           share&.buyable = true
+
+          strip_exchange_ability!(private_id)
         end
 
-        # The reserved Share object for this private (C3/N3/N4/S4), or nil once
-        # it's been redeemed or released. Used by G1881::Step::RedeemPrivateShare.
-        def reserved_share_for(private_id)
-          @reserved_shares[private_id]
+        # Called by G1881::Step::Exchange once the owner redeems C3/N3/N4/S4 for
+        # its reserved share. Unlike the base Exchange step, this does NOT close
+        # the private -- the owner keeps it (and may still sell it to a
+        # corporation later, see handle_c3_company_purchase et al.), but its
+        # income permanently drops to zero and it can never be exchanged again.
+        def redeem_reserved_private!(company)
+          @reserved_shares.delete(company.id)
+          @reserved_redeemed[company.id] = true
+          company.revenue = 0
+          strip_exchange_ability!(company.id)
+
+          @log << "#{company.owner.name} redeems #{company.name} for the reserved share -- " \
+                  "its income drops to #{format_currency(0)}"
         end
 
-        # Called once a player redeems C3/N3/N4/S4 for its reserved share (see
-        # G1881::Step::RedeemPrivateShare): the share is now owned outright, so
-        # -- unlike release_reserved_share -- it does not go back on the market.
-        def clear_reserved_share!(private_id)
-          @reserved_shares.delete(private_id)
+        def strip_exchange_ability!(private_id)
+          company = company_by_id(private_id)
+          exchange_ability = company&.all_abilities&.find { |a| a.type == :exchange }
+          company.remove_ability(exchange_ability) if exchange_ability
         end
 
         def par_prices
@@ -662,8 +682,7 @@ module Engine
         def stock_round
           Engine::Round::Stock.new(self, [
             Engine::Step::DiscardTrain,
-            Engine::Step::Exchange,
-            G1881::Step::RedeemPrivateShare, # C3/N3/N4/S4: redeem for the reserved share, any time
+            G1881::Step::Exchange, # also handles C3/N3/N4/S4 redeeming their reserved share, any time
             Engine::Step::SpecialTrack,
             Engine::Step::BuySellParShares,
           ])
@@ -770,7 +789,8 @@ module Engine
 
           # C3: a player buyer gets no special treatment at purchase time -- they
           # keep the reservation (and the K18 upgrade block) and may redeem it for
-          # the reserved share at any point via G1881::Step::RedeemPrivateShare.
+          # the reserved share at any point via the standard Exchange step (see
+          # the exchange ability granted in reserve_one_ipo_share).
           # When a corporation buys it unredeemed, the share returns to the IPO.
           if company.id == 'C3'
             handle_c3_company_purchase(buyer, company) if buyer.is_a?(Engine::Corporation)
@@ -843,9 +863,12 @@ module Engine
           share_pool.buy_shares(buyer, share, exchange: :free, allow_president_change: true)
           @log << "#{buyer.name} receives one share of #{corp.name} via #{company.name}"
 
-          # player → bank already happened in assign_private!; redirect bank → corp
-          @bank.spend(price, corp)
-          @log << "#{corp.name} receives #{format_currency(price)} (#{company.name} proceeds)"
+          # player → bank already happened in assign_private! (skipped there if price
+          # was forced down to 0), so only redirect bank → corp when there's cash to move.
+          if price.positive?
+            @bank.spend(price, corp)
+            @log << "#{corp.name} receives #{format_currency(price)} (#{company.name} proceeds)"
+          end
         end
 
         # N4: when a corporation purchases it, the corp (not the player) may redeem the

@@ -259,16 +259,13 @@ module Engine
             # Northern border bonuses (value 20, no stop): gentle side 6 → Ruby 5
             %w[C2 E2 G2] => 'town=revenue:20,visit_cost:0,route:optional;path=a:1,b:_0;path=a:5,b:_0',
 
-            # D11: straight side 6 → Ruby 5; straight 5↔2
-            ['D11'] => 'path=a:2,b:5',
-
             # E12: two gray towns (Dong Hoi area), gentle sides 4,1 → Ruby 3,0
             # gentle 3↔1 and gentle 0↔4 (approximation)
             ['E12'] => 'town=revenue:20;town=revenue:20;path=a:0,b:_0;path=a:2,b:_0;path=a:3,b:_1;path=a:5,b:_1',
 
             # H3: Thai Nguyen gray town, complex junction
             # straight side 2 → Ruby 1 (1↔4); stub side 3 → Ruby 2; sharp side 6 → Ruby 5 (5↔0)
-            ['H3'] => 'town=revenue:20;path=a:0,b:5;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0',
+            ['H3'] => 'town=revenue:20;path=a:5,b:_0;path=a:1,b:_0;path=a:2,b:_0;path=a:4,b:_0',
 
             # A4: gentle side 4 → Ruby 3; gentle 3↔1
             ['A4'] => 'path=a:5,b:3',
@@ -311,7 +308,7 @@ module Engine
             # Plain blank (no terrain cost)
             %w[D7 G14 F9 G6 G10 E10 H15 I14 I30
                J29 K24 K26 K28 H27 G28 H29 D31
-               B33 C36 E34 L21] => 'upgrade=cost:30,terrain:mine',
+               B33 C36 E34 L21 D11] => 'upgrade=cost:30,terrain:mine',
 
             # Mountain 60
             %w[B5 C6 C10 D3 F3 F13 H17 H19] =>
@@ -320,9 +317,9 @@ module Engine
             # Mountain 30
             %w[J23 J25 I22 D5 F5] => 'upgrade=cost:30,terrain:mountain',
 
-            # Water 60 (river crossing)
+            # Water 60 
             %w[E32 K22 C34 D35 E36 I16] =>
-              'upgrade=cost:60,terrain:water',
+              'upgrade=cost:40,terrain:water',
 
             # Water 40
             %w[H5 H7 E8 G8 H31 I32 L27] => 'upgrade=cost:40,terrain:water',

@@ -69,7 +69,7 @@ module Engine
             name: 'Central Railway – Hai Van Pass',
             sym: 'C1',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
                   'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -78,7 +78,7 @@ module Engine
             name: 'Central Railway – Hai Van Pass',
             sym: 'C2',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
                   'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -87,7 +87,7 @@ module Engine
             name: 'Central Railway – Hai Van Pass (4p)',
             sym: 'C1+',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
                   'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -96,7 +96,7 @@ module Engine
             name: 'Central Railway – Hai Van Pass (4p)',
             sym: 'C2+',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of a Central Concession corporation (CFCA or RCL). '\
                   'The full bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -112,11 +112,12 @@ module Engine
             desc: 'Reserves a share in a Central Concession corporation. While held by a player, '\
                   'blocks K18 (Hai Van Pass) from being upgraded. '\
                   'A player may redeem it, at any point during a Stock Round, for the reserved Central '\
-                  'Concession share (this closes the private). If sold to a corporation unredeemed, the '\
-                  'reserved share returns to that corp\'s IPO; the corporation may then close this private '\
-                  'for a free tile upgrade on K18 (token placement is not free). K18 can only be upgraded '\
-                  'to HV tiles. May only be sold to a corporation for up to its face value (not the usual '\
-                  '2x).',
+                  'Concession share; the private is not closed by this and its income drops to ₫0, but '\
+                  'it may still be sold to a corporation afterward. If sold to a corporation unredeemed, '\
+                  'the reserved share returns to that corp\'s IPO; the corporation may then close this '\
+                  'private for a free tile upgrade on K18 (token placement is not free). K18 can only be '\
+                  'upgraded to HV tiles. May only be sold to a corporation for up to its face value (not '\
+                  'the usual 2x).',
             color: nil,
           },
           {
@@ -143,7 +144,7 @@ module Engine
             name: 'Yunnan Trading Contract',
             sym: 'N2',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of the North Concession corporation (CFI or HPR). '\
                   'The bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -155,10 +156,12 @@ module Engine
             revenue: 5,
             max_price: 150,
             desc: 'Reserves a share in the North Concession. The owning player may redeem it, at any '\
-                  'point during a Stock Round, for the reserved North Concession share (this closes the '\
-                  'private). If sold to a corporation unredeemed, the reserved share returns to that '\
-                  'corp\'s IPO. Can be discarded to place the port bonus token (+30 to a port city). May '\
-                  'only be sold to a corporation for up to its face value (not the usual 2x).',
+                  'point during a Stock Round, for the reserved North Concession share; the private is '\
+                  'not closed by this and its income drops to ₫0, but it may still be sold to a '\
+                  'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
+                  'returns to that corp\'s IPO. Can be discarded to place the port bonus token (+30 to '\
+                  'a port city). May only be sold to a corporation for up to its face value (not the '\
+                  'usual 2x).',
             color: nil,
           },
           {
@@ -168,11 +171,12 @@ module Engine
             revenue: 10,
             max_price: 150,
             desc: 'Reserves a share in the North Concession. The owning player may redeem it, at any '\
-                  'point during a Stock Round, for the reserved North Concession share (this closes the '\
-                  'private). If sold to a corporation unredeemed, the reserved share returns to that '\
-                  'corp\'s IPO. The owner may also make a free placement or upgrade of one city or town '\
-                  'tile with a +30 city bonus token. May only be sold to a corporation for up to its face '\
-                  'value (not the usual 2x).',
+                  'point during a Stock Round, for the reserved North Concession share; the private is '\
+                  'not closed by this and its income drops to ₫0, but it may still be sold to a '\
+                  'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
+                  'returns to that corp\'s IPO. The owner may also make a free placement or upgrade of '\
+                  'one city or town tile with a +30 city bonus token. May only be sold to a corporation '\
+                  'for up to its face value (not the usual 2x).',
             color: nil,
           },
 
@@ -181,7 +185,7 @@ module Engine
             name: 'Mekong Delta Trading Contract',
             sym: 'S1',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of the South Concession corporation (STC or TMR). '\
                   'The bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -190,7 +194,7 @@ module Engine
             name: 'Mekong Delta Trading Contract',
             sym: 'S2',
             value: 60,
-            revenue: 0,
+            revenue: 5,
             desc: 'When purchased, receive one share of the South Concession corporation (STC or TMR). '\
                   'The bid price is paid to that corporation instead of the bank.',
             color: nil,
@@ -211,12 +215,13 @@ module Engine
             revenue: 10,
             max_price: 150,
             desc: 'Reserves a share in the South Concession. The owning player may redeem it, at any '\
-                  'point during a Stock Round, for the reserved South Concession share (this closes the '\
-                  'private). If sold to a corporation unredeemed, the reserved share returns to that '\
-                  'corp\'s IPO. A corporation owning this private may close it to place a free token on '\
-                  'C30 (Phnom Penh), which is what lets it route through the Cambodia gate '\
-                  '(C28/D27/E26/F25) to reach G26. May only be sold to a corporation for up to its face '\
-                  'value (not the usual 2x).',
+                  'point during a Stock Round, for the reserved South Concession share; the private is '\
+                  'not closed by this and its income drops to ₫0, but it may still be sold to a '\
+                  'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
+                  'returns to that corp\'s IPO. A corporation owning this private may close it to place '\
+                  'a free token on C30 (Phnom Penh), which is what lets it route through the Cambodia '\
+                  'gate (C28/D27/E26/F25) to reach G26. May only be sold to a corporation for up to its '\
+                  'face value (not the usual 2x).',
             abilities: [{
               type: 'token',
               owner_type: 'corporation',
