@@ -108,16 +108,26 @@ module Engine
             sym: 'C3',
             value: 150,
             revenue: 10,
-            max_price: 150,
+            max_price: 75,
             desc: 'Reserves a share in a Central Concession corporation. While held by a player, '\
                   'blocks K18 (Hai Van Pass) from being upgraded. '\
                   'A player may redeem it, at any point during a Stock Round, for the reserved Central '\
                   'Concession share; the private is not closed by this and its income drops to ₫0, but '\
                   'it may still be sold to a corporation afterward. If sold to a corporation unredeemed, '\
-                  'the reserved share returns to that corp\'s IPO; the corporation may then close this '\
-                  'private for a free tile upgrade on K18 (token placement is not free). K18 can only be '\
-                  'upgraded to HV tiles. May only be sold to a corporation for up to its face value (not '\
-                  'the usual 2x).',
+                  'the reserved share returns to the bank. Once owned by a corporation, it may be closed '\
+                  'at any time for a free tile upgrade on K18 (token placement is not free). K18 can only '\
+                  'be upgraded to HV tiles. May only be sold to a corporation for up to half of its face '\
+                  'value.',
+            abilities: [{
+              type: 'tile_lay',
+              owner_type: 'corporation',
+              hexes: ['K18'],
+              tiles: %w[HV1 HV2 HV3],
+              free: true,
+              reachable: true,
+              count: 1,
+              closed_when_used_up: true,
+            }],
             color: nil,
           },
           {
@@ -154,14 +164,22 @@ module Engine
             sym: 'N3',
             value: 150,
             revenue: 5,
-            max_price: 150,
+            max_price: 75,
             desc: 'Reserves a share in the North Concession. The owning player may redeem it, at any '\
                   'point during a Stock Round, for the reserved North Concession share; the private is '\
                   'not closed by this and its income drops to ₫0, but it may still be sold to a '\
                   'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
-                  'returns to that corp\'s IPO. Can be discarded to place the port bonus token (+30 to '\
-                  'a port city). May only be sold to a corporation for up to its face value (not the '\
-                  'usual 2x).',
+                  'returns to the bank. Once owned by a corporation, it may be discarded at any time to '\
+                  'place a permanent +₫30 revenue bonus on one of a fixed set of port hexes, for that '\
+                  'corporation\'s routes only. May only be sold to a corporation for up to half of its '\
+                  'face value.',
+            abilities: [{
+              type: 'assign_hexes',
+              owner_type: 'corporation',
+              hexes: %w[J9 L33 G36 E38 B37],
+              count: 1,
+              closed_when_used_up: true,
+            }],
             color: nil,
           },
           {
@@ -169,14 +187,25 @@ module Engine
             sym: 'N4',
             value: 150,
             revenue: 10,
-            max_price: 150,
+            max_price: 75,
             desc: 'Reserves a share in the North Concession. The owning player may redeem it, at any '\
                   'point during a Stock Round, for the reserved North Concession share; the private is '\
                   'not closed by this and its income drops to ₫0, but it may still be sold to a '\
                   'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
-                  'returns to that corp\'s IPO. The owner may also make a free placement or upgrade of '\
-                  'one city or town tile with a +30 city bonus token. May only be sold to a corporation '\
-                  'for up to its face value (not the usual 2x).',
+                  'returns to the bank. Once owned by a corporation, it may make a free placement or '\
+                  'upgrade of one reachable city or town tile, adding a permanent +₫30 revenue bonus '\
+                  'there for that corporation\'s routes only. May only be sold to a corporation for up '\
+                  'to half of its face value.',
+            abilities: [{
+              type: 'tile_lay',
+              owner_type: 'corporation',
+              hexes: [],
+              tiles: [],
+              free: true,
+              reachable: true,
+              count: 1,
+              closed_when_used_up: true,
+            }],
             color: nil,
           },
 
@@ -213,15 +242,15 @@ module Engine
             sym: 'S4',
             value: 150,
             revenue: 10,
-            max_price: 150,
+            max_price: 75,
             desc: 'Reserves a share in the South Concession. The owning player may redeem it, at any '\
                   'point during a Stock Round, for the reserved South Concession share; the private is '\
                   'not closed by this and its income drops to ₫0, but it may still be sold to a '\
                   'corporation afterward. If sold to a corporation unredeemed, the reserved share '\
-                  'returns to that corp\'s IPO. A corporation owning this private may close it to place '\
+                  'returns to the bank. A corporation owning this private may close it to place '\
                   'a free token on C30 (Phnom Penh), which is what lets it route through the Cambodia '\
-                  'gate (C28/D27/E26/F25) to reach G26. May only be sold to a corporation for up to its '\
-                  'face value (not the usual 2x).',
+                  'gate (C28/D27/E26/F25) to reach G26. May only be sold to a corporation for up to half '\
+                  'of its face value.',
             abilities: [{
               type: 'token',
               owner_type: 'corporation',

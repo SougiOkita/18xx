@@ -4,6 +4,7 @@ require_relative 'entities'
 require_relative 'map'
 require_relative 'meta'
 require_relative 'round/auction'
+require_relative 'step/assign'
 require_relative 'step/auction'
 require_relative 'step/buy_train'
 require_relative 'step/dividend'
@@ -14,6 +15,7 @@ require_relative 'step/loan'
 require_relative 'step/pay_interest'
 require_relative 'step/nationalization'
 require_relative 'step/merge'
+require_relative 'step/special_track'
 require_relative 'step/vnr_founders_tile'
 require_relative 'step/vnr_founders_token'
 require_relative '../../loan'
@@ -311,6 +313,13 @@ module Engine
         CAMBODIA_GATE_HEXES = %w[C28 D27 E26 F25].freeze
         PHNOM_PENH_HEX = 'C30'
 
+        # N3's fixed port-hex choices for its bonus-hex ability (see entities.rb).
+        N3_PORT_HEXES = %w[J9 L33 G36 E38 B37].freeze
+
+        # Revenue added per bonus-hex marker placed by N3/N4 (see revenue_for),
+        # usable only by the corporation that placed it.
+        BONUS_HEX_REVENUE = 30
+
         # =====================================================================
         # TILE LAY RULES (phase-based)
         # Yellow: 2 yellow lays; Green: 2 yellow OR 1 green upgrade; Brown: 1
@@ -541,12 +550,16 @@ module Engine
           )
         end
 
-        # Restore the reserved share to normal IPO availability (the private was
-        # sold to a corporation unredeemed). Also strips the exchange ability
-        # granted in reserve_one_ipo_share, since there's nothing left to redeem.
+        # Send the reserved share to the bank (open market), rather than leaving
+        # it in the corp's own IPO, since the private was sold to a corporation
+        # unredeemed. Also strips the exchange ability granted in
+        # reserve_one_ipo_share, since there's nothing left to redeem.
         def release_reserved_share(private_id)
           share = @reserved_shares.delete(private_id)
-          share&.buyable = true
+          if share
+            share.buyable = true
+            @share_pool.transfer_shares(Engine::ShareBundle.new([share]), @share_pool)
+          end
 
           strip_exchange_ability!(private_id)
         end
@@ -570,6 +583,17 @@ module Engine
           company = company_by_id(private_id)
           exchange_ability = company&.all_abilities&.find { |a| a.type == :exchange }
           company.remove_ability(exchange_ability) if exchange_ability
+        end
+
+        # Called by G1881::Step::Assign (N3) and G1881::Step::SpecialTrack (N4)
+        # right after their one-time ability is used. Tags the hex with the
+        # acting corporation's own id, so revenue_for can grant the +₫30 bonus
+        # to that corporation's routes only, permanently (it survives future
+        # tile upgrades on the hex, since the assignment lives on the Hex).
+        def assign_bonus_hex!(corp, hex)
+          hex.assign!(corp.id)
+          @log << "#{corp.name} adds a permanent #{format_currency(self.class::BONUS_HEX_REVENUE)} " \
+                  "revenue bonus to #{hex.full_name} for its own routes"
         end
 
         def par_prices
@@ -683,7 +707,8 @@ module Engine
           Engine::Round::Stock.new(self, [
             Engine::Step::DiscardTrain,
             G1881::Step::Exchange, # also handles C3/N3/N4/S4 redeeming their reserved share, any time
-            Engine::Step::SpecialTrack,
+            G1881::Step::Assign,   # N3: discard for a port bonus hex, any time
+            G1881::Step::SpecialTrack, # C3/N4: free tile-lay abilities, any time
             Engine::Step::BuySellParShares,
           ])
         end
@@ -915,13 +940,20 @@ module Engine
           @log << "#{corp.name} receives +#{format_currency(10)} per Laos hex on each route"
         end
 
-        # Add Laos Export Contract bonus: +10 per Laos hex visited on the route.
+        # Add the Laos Export Contract bonus (+10/Laos hex, owning corp only) and
+        # any N3/N4 bonus-hex markers (+30/hex, see Game#assign_bonus_hex!,
+        # restricted to whichever corporation placed each one).
         def revenue_for(route, stops)
           base = super
-          return base unless @laos_contract_owner && route.train.owner == @laos_contract_owner
 
-          laos_count = stops.count { |s| self.class::LAOS_HEXES.include?(s.hex.id) }
-          base += laos_count * 10 if laos_count.positive?
+          if @laos_contract_owner && route.train.owner == @laos_contract_owner
+            laos_count = stops.count { |s| self.class::LAOS_HEXES.include?(s.hex.id) }
+            base += laos_count * 10 if laos_count.positive?
+          end
+
+          bonus_hex_count = stops.count { |s| s.hex.assigned?(route.corporation.id) }
+          base += bonus_hex_count * self.class::BONUS_HEX_REVENUE if bonus_hex_count.positive?
+
           base
         end
 
@@ -1475,7 +1507,8 @@ module Engine
             Engine::Step::Bankrupt,
             G1881::Step::RedeemShares,    # 1. Redeem share (beginning of OR)
             G1881::Step::Loan,            # 1b. Take/repay a Doumer fund loan
-            Engine::Step::SpecialTrack,
+            G1881::Step::Assign,          # 1c. N3: discard for a port bonus hex
+            G1881::Step::SpecialTrack,    # C3/N4: free tile-lay abilities
             Engine::Step::SpecialToken,
             Engine::Step::HomeToken,
             Engine::Step::Track,          # 2. Lay/upgrade tiles (phase-based)

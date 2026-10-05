@@ -33,11 +33,11 @@ describe Engine::Game::G1881::Game do
     game.process_action(Engine::Action::BuyShares.new(company, shares: share)).maybe_raise!
   end
 
-  describe 'max_price (face-value-only resale)' do
-    it 'caps C3, N3, N4, and S4 at their face value instead of the usual 2x' do
+  describe 'max_price (half-face-value resale)' do
+    it 'caps C3, N3, N4, and S4 at half their face value instead of the usual 2x' do
       %w[C3 N3 N4 S4].each do |id|
         company = game.company_by_id(id)
-        expect(company.max_price).to eq(company.value)
+        expect(company.max_price).to eq(company.value / 2)
       end
     end
 
@@ -133,19 +133,21 @@ describe Engine::Game::G1881::Game do
       expect(c3.revenue).to eq(0)
     end
 
-    it 'releases the reserved share and strips the exchange ability when sold unredeemed' do
+    it 'releases the reserved share to the bank (not the corp IPO) and strips the exchange ability when sold unredeemed' do
       setup_concessions!
       c3 = game.company_by_id('C3')
       cfca = game.corporation_by_id('CFCA')
       give_private!(player_a, c3)
+      reserved_share = cfca.reserved_shares.first
 
       c3.owner = cfca
       cfca.companies << c3
       game.after_buy_company(cfca, c3, c3.value)
 
       expect(cfca.reserved_shares).to be_empty
-      reserved_share = cfca.shares.find { |s| !s.president }
       expect(reserved_share.buyable).to eq(true)
+      expect(reserved_share.owner).to eq(game.share_pool)
+      expect(cfca.shares).not_to include(reserved_share)
       expect(game.abilities(c3, :exchange)).to be_nil
     end
   end
